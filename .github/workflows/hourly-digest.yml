@@ -1,0 +1,16 @@
+name: Hourly notification digest
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  call-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call run-digest Edge Function
+        run: |
+          curl --fail --silent --show-error \
+            -X POST "${{ secrets.DIGEST_URL }}" \
+            -H "x-webhook-secret: ${{ secrets.WEBHOOK_SECRET }}"
