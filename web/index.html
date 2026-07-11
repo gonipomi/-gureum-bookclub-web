@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1E1B16" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="구름멍멍교환독서클럽">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="https://hrflix.org/wp-content/uploads/2026/07/gyohwan-dokseo-icon.png?v=2">
+<link rel="icon" type="image/png" href="https://hrflix.org/wp-content/uploads/2026/07/gyohwan-dokseo-icon.png?v=2">
+<title>구름멍멍교환독서클럽</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  /* Phase 1 전용: 로그인/그룹 게이트 화면 레이아웃 (앱 본문 스타일은 style.css 그대로 재사용) */
+  .auth-gate{ display:flex; min-height:70vh; align-items:flex-start; justify-content:center; padding:24px 16px; }
+</style>
+</head>
+<body>
+
+<header class="topbar" id="topbar" style="display:none;">
+  <div class="brand">
+    <span class="brand-mark" id="currentGroupName">구름멍멍교환독서클럽</span>
+    <span class="brand-sub mono">책에 돈보다 시간을 쓰자</span>
+  </div>
+  <nav class="tabs">
+    <button class="tab-btn active" data-view="home">홈</button>
+    <button class="tab-btn" data-view="shelf">우리 서고</button>
+    <button class="tab-btn" data-view="wishlist">이 책 찾아요</button>
+    <button class="tab-btn" data-view="records">독서기록</button>
+    <button class="tab-btn" data-view="members">멤버</button>
+    <button class="tab-btn" data-view="myPage">마이페이지</button>
+  </nav>
+  <div id="loginStatusBox"></div>
+</header>
+
+<main id="authGate" class="auth-gate"></main>
+
+<main id="main" style="display:none;">
+  <div class="app-loading">
+    <img class="app-loading-icon" src="https://hrflix.org/wp-content/uploads/2026/07/gyohwan-dokseo-icon.png?v=2" alt="">
+    <p class="app-loading-text">불러오는 중<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></p>
+  </div>
+</main>
+
+<button class="fab" id="fabBtn" title="추가" style="display:none;">＋</button>
+
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal-sheet" id="modalSheet"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app.js"></script>
+<script src="client.js" defer></script>
+</body>
+</html>

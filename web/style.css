@@ -1,0 +1,424 @@
+:root{
+    --paper: #F2EDE1;
+    --paper-dark: #E8E0CC;
+    --ink: #2B3245;
+    --ink-soft: #4A5169;
+    --stamp: #B5402E;
+    --pencil: #8A8578;
+    --line-green: #5C7A5C;
+    --gold: #B8863B;
+    --card-shadow: rgba(43,50,69,0.15);
+    --card-bg: #fff;
+    --gold-bg: #FFF3E0;
+    --green-bg: #EAF3EA;
+    --radius-stamp: 3px;
+    --radius-card: 8px;
+    --radius-pill: 999px;
+    --border-w: 1.5px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper: #1E1B16;
+      --paper-dark: #2A251E;
+      --ink: #EDE6D6;
+      --ink-soft: #C7BFAE;
+      --stamp: #E17A5F;
+      --pencil: #9C9585;
+      --line-green: #85AC85;
+      --gold: #D9A855;
+      --card-shadow: rgba(0,0,0,0.5);
+      --card-bg: #2C2820;
+      --gold-bg: #3A2E18;
+      --green-bg: #1F2B1F;
+    }
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  /* 브라우저(특히 iOS Safari)는 <button>에 CSS color를 상속시키지 않고 시스템 기본 글자색을
+     적용하는 경우가 있어, 다크모드에서 색을 따로 안 준 버튼(찜하기 등)이 어두운 배경에
+     검정 글씨로 남는 문제가 있었다. 전역으로 상속을 강제한다. */
+  button{ color: inherit; font-family: inherit; -webkit-appearance: none; appearance: none; }
+  body{
+    background: var(--paper);
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(0,0,0,0.015) 0%, transparent 40%),
+      radial-gradient(circle at 80% 80%, rgba(0,0,0,0.02) 0%, transparent 40%);
+    color: var(--ink);
+    font-family: 'Gowun Dodum', sans-serif;
+    min-height:100vh;
+    padding-bottom: 80px;
+  }
+  .mono{font-family:'JetBrains Mono', monospace;}
+  .serif{font-family:'Gowun Batang', serif;}
+
+  header.topbar{
+    position:sticky; top:0; z-index:50;
+    background: var(--paper);
+    border-bottom: 2px solid var(--ink);
+    padding: 14px 20px;
+    display:flex; align-items:center; justify-content:space-between;
+    flex-wrap:wrap; gap:10px;
+  }
+  .brand{ display:flex; align-items:baseline; gap:8px; }
+  .brand-mark{ font-family:'Gowun Batang', serif; font-weight:700; font-size:20px; letter-spacing:-0.5px; }
+  .brand-sub{ font-family:'JetBrains Mono', monospace; font-size:10px; color:var(--pencil); letter-spacing:1px; }
+  nav.tabs{ display:flex; gap:4px; background: var(--paper-dark); border-radius:var(--radius-pill); padding:3px; overflow-x:auto; }
+  nav.tabs button{
+    border:none; background:transparent; font-family:'Gowun Dodum', sans-serif; font-size:12.5px;
+    padding:7px 12px; border-radius:var(--radius-pill); color: var(--ink-soft); cursor:pointer; transition: all 0.2s; white-space:nowrap;
+  }
+  nav.tabs button.active{ background: var(--ink); color: var(--paper); }
+
+  #loginStatusBox{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .login-pill{
+    display:flex; align-items:center; gap:6px; background: var(--paper-dark); border:var(--border-w) solid var(--ink);
+    border-radius:var(--radius-pill); padding:4px 10px 4px 4px; cursor:pointer; font-family:'Gowun Dodum',sans-serif; font-size:12.5px;
+  }
+  .login-pill .avatar-circle{ width:26px; height:26px; font-size:13px; }
+  .login-btn-pill{
+    display:flex; align-items:center; gap:5px; background: var(--ink); color: var(--paper); border:none;
+    border-radius:var(--radius-pill); padding:7px 14px; cursor:pointer; font-family:'Gowun Dodum',sans-serif; font-size:12.5px;
+  }
+
+  main{ max-width: 720px; margin: 0 auto; padding: 24px 18px; }
+
+  .app-loading{ display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh; gap:18px; }
+  .app-loading-icon{
+    width:84px; height:84px; border-radius:20px; border:var(--border-w) solid var(--ink);
+    box-shadow:3px 3px 0 var(--card-shadow); animation: loading-bounce 1.2s ease-in-out infinite;
+  }
+  @keyframes loading-bounce{
+    0%,100%{ transform: translateY(0) rotate(-4deg); }
+    50%{ transform: translateY(-12px) rotate(4deg); }
+  }
+  .app-loading-text{ font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--pencil); }
+  .loading-dots span{ animation: loading-dot-fade 1.4s infinite; opacity:0; }
+  .loading-dots span:nth-child(1){ animation-delay:0s; }
+  .loading-dots span:nth-child(2){ animation-delay:0.2s; }
+  .loading-dots span:nth-child(3){ animation-delay:0.4s; }
+  @keyframes loading-dot-fade{ 0%,80%,100%{opacity:0;} 40%{opacity:1;} }
+
+  .section-label{ display:flex; align-items:center; gap:10px; margin: 28px 0 14px; }
+  .section-label:first-child{ margin-top:0; }
+  .section-label .num{
+    font-family:'JetBrains Mono', monospace; font-size:11px; color: var(--paper); background: var(--stamp);
+    padding:2px 7px; border-radius:3px; transform: rotate(-2deg);
+  }
+  .section-label h2{ font-family:'Gowun Batang', serif; font-size:17px; font-weight:700; }
+  .section-label .line{ flex:1; height:1px; background: repeating-linear-gradient(90deg, var(--pencil) 0 4px, transparent 4px 8px); opacity:0.5; }
+
+  /* 다음 교환일 배너 */
+  .exchange-banner{
+    background: var(--ink); color: var(--paper); border-radius:var(--radius-card); padding:14px 16px;
+    display:flex; align-items:center; gap:12px; margin-bottom:20px;
+    box-shadow: 3px 3px 0 var(--card-shadow);
+  }
+  .exchange-banner .ex-icon{ font-size:22px; }
+  .exchange-banner .ex-text{ flex:1; }
+  .exchange-banner .ex-label{ font-size:11px; opacity:0.7; font-family:'JetBrains Mono',monospace; }
+  .exchange-banner .ex-date{ font-family:'Gowun Batang',serif; font-size:16px; font-weight:700; }
+  .exchange-banner .ex-dday{
+    font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700;
+    background: var(--stamp); padding:3px 9px; border-radius:var(--radius-pill);
+  }
+
+  .avatar-circle{
+    width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-family:'Gowun Batang', serif; font-weight:700; font-size:18px; color: var(--paper);
+    border: 2px solid var(--ink); transition: transform 0.15s; overflow:hidden;
+  }
+
+  /* 대출카드 */
+  .card-stack{ display:flex; flex-direction:column; gap:16px; }
+  .library-compact-grid{ display:grid !important; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px !important; }
+  .library-compact-grid .due-card{ min-width:0; }
+  .library-compact-grid .due-card-top{ padding:10px; gap:8px; align-items:flex-start !important; min-height:0; }
+  .library-compact-grid .book-thumb{ width:46px; height:64px; flex-shrink:0; }
+  .library-compact-grid .due-card-info .title{ font-size:13.5px; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .library-compact-grid .due-card-info .author{ font-size:11px; margin-bottom:4px; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
+  .library-compact-grid .stamp{ font-size:10px; padding:2px 5px; }
+  .library-compact-grid .due-card-bottom{ padding:0 10px 10px; gap:6px; flex-wrap:wrap; }
+  .library-compact-grid .library-status-select{ max-width:100%; font-size:11px !important; padding:4px 6px !important; }
+
+
+  .exchange-card-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .exchange-card-grid .due-card{ min-width:0; }
+  .exchange-card-grid .due-card-top{ padding:12px; gap:8px; min-height:0; }
+  .exchange-card-grid .due-card-info .title{ line-height:1.25; }
+  .exchange-card-grid .due-card-info .author{ font-size:11.5px; line-height:1.35; }
+  .exchange-card-grid .due-card-bottom{ padding:0 12px 12px; }
+
+  .exchange-mini-card{ box-shadow:2px 2px 0 var(--card-shadow); }
+  .exchange-mini-top{ padding:12px 12px 8px; cursor:pointer; }
+  .exchange-mini-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:6px; }
+  .exchange-mini-date{ font-family:'Gowun Batang',serif; font-weight:700; font-size:16px; line-height:1.15; white-space:nowrap; }
+  .exchange-mini-dday{ font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; background:var(--stamp); color:var(--paper); padding:3px 7px; border-radius:var(--radius-pill); white-space:nowrap; }
+  .exchange-mini-stats{ margin-top:7px; font-size:12px; line-height:1.35; color:var(--stamp); font-weight:700; }
+  .exchange-mini-names{ margin-top:5px; font-size:11px; line-height:1.35; color:var(--pencil); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .exchange-actions{ display:flex; align-items:center; justify-content:space-between; padding:0 10px 10px; gap:6px; }
+  .exchange-actions .heart-btn, .exchange-actions .btn-text{ font-size:11.5px; padding:6px 9px; white-space:nowrap; }
+  @media (max-width:520px){
+    .exchange-card-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .exchange-mini-top{ padding:11px 10px 7px; }
+    .exchange-mini-date{ font-size:15px; }
+    .exchange-mini-stats{ font-size:11.5px; }
+    .exchange-mini-names{ font-size:10.5px; }
+    .exchange-actions{ padding:0 9px 9px; gap:5px; }
+    .exchange-actions .heart-btn, .exchange-actions .btn-text{ font-size:11px; padding:6px 7px; }
+  }
+
+  .book-card-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+  .exchange-banner .book-card-grid, .modal-sheet .book-card-grid{ display:flex; flex-direction:column; }
+  @media (max-width:560px){ .book-card-grid{ grid-template-columns:1fr; } }
+  .due-card{
+    background: var(--card-bg); border: var(--border-w) solid var(--ink); border-radius: var(--radius-stamp); box-shadow: 3px 3px 0 var(--card-shadow);
+    padding: 0; overflow:hidden; position:relative; cursor:pointer; transition: transform 0.15s, box-shadow 0.15s;
+    display:flex; flex-direction:column;
+  }
+  .due-card:active{ transform: translate(1px,1px); box-shadow: 1px 1px 0 var(--card-shadow); }
+  .due-card-top{ display:flex; gap:14px; padding: 16px 16px 12px; }
+  /* 홈 화면 2열 책 카드: 소장/읽기시작/진행률/교환/신청 등 줄 수가 카드마다 달라도
+     댓글창·찜하기 위치가 흔들리지 않도록, 제목과 부가정보 영역을 고정 높이로 잘라낸다. */
+  .book-card-grid .due-card-info .title{
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; height:44px;
+  }
+  .book-card-grid .due-card-info .author{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .book-card-grid .due-card-extra{ height:124px; overflow:hidden; }
+  .book-thumb{
+    width:56px; height:78px; flex-shrink:0; border-radius:2px;
+    background: linear-gradient(135deg, var(--line-green), #3f5940);
+    display:flex; align-items:center; justify-content:center; color:#fff; font-family:'Gowun Batang',serif;
+    font-size:11px; text-align:center; overflow:hidden; box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+  }
+  .book-thumb img{ width:100%; height:100%; object-fit:cover; }
+  .due-card-info{ flex:1; min-width:0; }
+  .due-card-info .title{ font-family:'Gowun Batang', serif; font-weight:700; font-size:16px; line-height:1.35; margin-bottom:2px; }
+  .due-card-info .author{ font-size:12px; color: var(--pencil); margin-bottom:8px; }
+  .stamp-row{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .stamp{
+    font-family:'JetBrains Mono', monospace; font-size:10px; font-weight:700; color: var(--stamp);
+    border: var(--border-w) solid var(--stamp); padding: 2px 6px; border-radius: var(--radius-stamp); transform: rotate(-3deg); letter-spacing:0.5px;
+  }
+  .stamp.done{ color: var(--line-green); border-color: var(--line-green); }
+  .reader-name{ font-size:13px; color: var(--ink); font-weight:500; }
+  .date-range{ font-size:11px; color: var(--pencil); font-family:'JetBrains Mono',monospace; }
+  .due-card-bottom{ padding: 10px 16px 14px; display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:auto; }
+  .queue-empty{ font-size:12px; color: var(--pencil); font-style:italic; }
+  .queue-waiting-highlight{
+    flex:1; min-width:0; font-size:12.5px; color:var(--stamp); font-weight:700;
+    background:var(--gold-bg); border:var(--border-w) solid var(--gold); border-radius:var(--radius-pill); padding:5px 9px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .card-comment-preview{
+    margin:0 16px 10px; padding:8px 10px; border-radius:var(--radius-card); background:var(--paper-dark);
+    border:var(--border-w) dashed var(--pencil); font-size:11.5px; color:var(--ink-soft); line-height:1.45;
+  }
+  .card-comment-preview .comment-count{ font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--pencil); margin-left:4px; }
+  .card-comment-preview .comment-text{ display:block; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .heart-btn{
+    display:flex; align-items:center; gap:5px; background: var(--paper-dark); border:var(--border-w) solid var(--ink); color: var(--ink);
+    border-radius:var(--radius-pill); padding:5px 12px; font-family:'Gowun Dodum',sans-serif; font-size:12px; cursor:pointer; flex-shrink:0;
+  }
+  .heart-btn:active{ transform: scale(0.95); }
+
+  /* 완독 책장 (쌓인 이미지) */
+  .bookshelf{
+    background: linear-gradient(180deg, transparent 0%, transparent calc(100% - 14px), var(--pencil) calc(100% - 14px), var(--pencil) 100%);
+    padding: 10px 6px 24px;
+    display:flex; gap:0; overflow-x:auto; align-items:flex-end;
+    -webkit-overflow-scrolling: touch;
+  }
+  .bookshelf::-webkit-scrollbar{ display:none; }
+  .shelf-book{
+    flex-shrink:0; width:40px; height:130px; border-radius:2px 5px 5px 2px;
+    display:flex; align-items:flex-end; justify-content:center; position:relative; cursor:pointer;
+    box-shadow: 1px 0 0 rgba(0,0,0,0.15) inset, 2px 2px 4px rgba(0,0,0,0.2);
+    margin-left:-2px; transition: transform 0.15s;
+    border: 1px solid rgba(0,0,0,0.2);
+  }
+  .shelf-book:hover, .shelf-book:active{ transform: translateY(-6px); z-index:5; }
+  .shelf-book .spine-title{
+    writing-mode: vertical-rl; text-orientation: mixed; color:#fff; font-family:'Gowun Batang',serif;
+    font-size:10px; padding:8px 0; max-height:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .shelf-empty{ color:var(--pencil); font-size:13px; padding: 10px 4px 30px; }
+
+  /* 우리 서고 카테고리 탭 */
+  .shelf-category-tabs{ display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 16px; }
+  .shelf-category-tabs .btn-secondary{ flex:1 1 calc(50% - 4px); margin-top:0; padding:10px 6px; font-size:13px; }
+
+  /* 교환일 달력 뷰 */
+  .exchange-calendar{ padding:4px 2px 2px; }
+  .cal-nav{ display:flex; align-items:center; justify-content:center; gap:16px; margin-bottom:8px; }
+  .cal-month-label{ font-family:'Gowun Batang',serif; font-weight:700; font-size:15px; }
+  .cal-nav .btn-text{ font-size:18px; padding:2px 10px; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+  .cal-weekday-row{ margin-bottom:4px; }
+  .cal-weekday{ text-align:center; font-size:10.5px; color:var(--pencil); font-family:'JetBrains Mono',monospace; }
+  .cal-cell{
+    aspect-ratio:1; border-radius:6px; border:1px solid transparent; padding:3px 2px;
+    display:flex; flex-direction:column; align-items:center; gap:2px; cursor:default;
+  }
+  .cal-cell-empty{ visibility:hidden; }
+  .cal-daynum{ font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--ink-soft); }
+  .cal-dots{ display:flex; flex-wrap:wrap; justify-content:center; gap:1px; }
+  .cal-dot{ width:6px; height:6px; border-radius:50%; display:inline-block; }
+  .cal-today .cal-daynum{ color:var(--ink); font-weight:700; text-decoration:underline; }
+  .cal-confirmed{ background:var(--card-bg); border-color:var(--stamp); cursor:pointer; }
+  .cal-proposal{ background:var(--gold-bg); border:1px dashed var(--gold); cursor:pointer; }
+
+  .empty-state{ text-align:center; padding: 50px 20px; color: var(--pencil); }
+  .empty-state .stamp-big{
+    font-family:'JetBrains Mono', monospace; font-size:13px; font-weight:700; color: var(--stamp);
+    border: 2px solid var(--stamp); display:inline-block; padding:6px 14px; border-radius:var(--radius-stamp); transform: rotate(-4deg); margin-bottom:16px;
+  }
+  .empty-state p{ font-size:14px; line-height:1.6; }
+
+  .fab{
+    position:fixed; bottom:24px; right:20px; z-index:40; width:56px; height:56px; border-radius:50%;
+    background: var(--ink); color: var(--paper); border:none; font-size:26px; box-shadow: 3px 3px 0 var(--card-shadow); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .fab:active{ transform: translate(2px,2px); box-shadow:1px 1px 0 var(--card-shadow); }
+
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(43,50,69,0.5); z-index:100; display:flex; align-items:flex-end; justify-content:center;
+    opacity:0; pointer-events:none; transition:opacity 0.2s;
+  }
+  .modal-backdrop.open{ opacity:1; pointer-events:auto; }
+  .modal-sheet{
+    background: var(--paper); width:100%; max-width:720px; border-radius: 16px 16px 0 0; padding: 22px 20px 28px;
+    max-height:88vh; overflow-y:auto; transform: translateY(100%); transition: transform 0.25s cubic-bezier(.2,.8,.2,1);
+    border-top: 2px solid var(--ink); position:relative;
+  }
+  .modal-backdrop.open .modal-sheet{ transform: translateY(0); }
+  .modal-sheet h3{ font-family:'Gowun Batang', serif; font-size:19px; margin-bottom:16px; padding-right:24px; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:12px; color: var(--pencil); margin-bottom:6px; font-family:'JetBrains Mono', monospace; }
+  .field input, .field select, .field textarea, .input-plain{
+    width:100%; padding:10px 12px; border: var(--border-w) solid var(--ink); border-radius:var(--radius-card); background:var(--card-bg);
+    font-family:'Gowun Dodum', sans-serif; font-size:14px; color:var(--ink);
+  }
+  .field textarea{ resize:vertical; min-height:60px; }
+  .color-picker{ display:flex; gap:8px; flex-wrap:wrap; }
+  .color-swatch{ width:32px; height:32px; border-radius:50%; cursor:pointer; border: 2px solid transparent; }
+  .color-swatch.selected{ border-color: var(--ink); transform:scale(1.1); }
+  .btn-primary{
+    width:100%; padding:13px; background: var(--ink); color: var(--paper); border:none; border-radius:var(--radius-card);
+    font-family:'Gowun Dodum',sans-serif; font-size:15px; font-weight:500; cursor:pointer; margin-top:6px;
+  }
+  .btn-primary:active{ opacity:0.85; }
+  .btn-primary:disabled{ opacity:0.5; cursor:not-allowed; }
+  .btn-secondary{
+    width:100%; padding:11px; background: transparent; color: var(--ink); border:var(--border-w) solid var(--ink); border-radius:var(--radius-card);
+    font-family:'Gowun Dodum',sans-serif; font-size:14px; cursor:pointer; margin-top:8px;
+  }
+  .btn-secondary.active{ background: var(--ink); color: var(--paper); }
+  .btn-text{ width:auto; padding:4px 8px; background:transparent; color:var(--pencil); border:none; font-size:12px; cursor:pointer; }
+  .close-x{ position:absolute; top:16px; right:16px; background:none; border:none; font-size:20px; color:var(--pencil); cursor:pointer; }
+
+  .detail-header{ display:flex; gap:16px; margin-bottom:16px; }
+  .detail-thumb{
+    width:90px; height:126px; border-radius:3px; flex-shrink:0; background: linear-gradient(135deg, var(--line-green), #3f5940);
+    display:flex; align-items:center; justify-content:center; color:#fff; font-family:'Gowun Batang',serif; font-size:12px;
+    text-align:center; padding:8px; box-shadow: 2px 2px 4px rgba(0,0,0,0.2); overflow:hidden;
+  }
+  .detail-thumb img{ width:100%; height:100%; object-fit:cover; }
+  .detail-title{ font-family:'Gowun Batang',serif; font-weight:700; font-size:20px; line-height:1.3; margin-bottom:4px; }
+  .detail-author{ font-size:13px; color:var(--pencil); margin-bottom:8px; }
+  .edit-icon-btn{
+    background:none; border:none; color:var(--pencil); font-size:13px; cursor:pointer; text-decoration:underline;
+    padding:0; margin-top:2px;
+  }
+  .back-btn{ display:inline-flex; align-items:center; gap:4px; font-size:13px; color: var(--ink-soft); background:none; border:none; cursor:pointer; margin-bottom:16px; padding:4px 0; }
+
+  .info-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:20px; }
+  .info-box{ background:var(--card-bg); border:var(--border-w) solid var(--ink); border-radius:var(--radius-card); padding:10px 12px; }
+  .info-box .ib-label{ font-size:10px; color:var(--pencil); font-family:'JetBrains Mono',monospace; margin-bottom:3px; }
+  .info-box .ib-value{ font-size:13.5px; font-weight:500; }
+
+  .queue-list{ display:flex; flex-direction:column; gap:8px; }
+  .queue-item{ display:flex; align-items:center; gap:10px; background:var(--card-bg); border:var(--border-w) solid var(--ink); border-radius:var(--radius-card); padding:10px 12px; }
+  .queue-item .qnum{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:13px; color: var(--pencil); width:20px; }
+  .queue-item.first .qnum{ color: var(--stamp); }
+  .queue-item .qavatar{ width:30px; height:30px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-family:'Gowun Batang',serif; font-weight:700; font-size:12px; overflow:hidden; }
+  .queue-item .qname{ flex:1; font-size:14px; }
+  .queue-item .qtag{ font-size:10px; font-family:'JetBrains Mono',monospace; color: var(--stamp); border:var(--border-w) solid var(--stamp); padding:1px 6px; border-radius:var(--radius-pill); }
+
+  .photo-lightbox{ position:fixed; inset:0; background:rgba(20,20,25,0.94); z-index:200; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; }
+  .photo-lightbox img{ max-width:100%; max-height:65vh; border-radius:var(--radius-card); }
+  .photo-lightbox .lb-caption{ color:#fff; margin-top:14px; text-align:center; font-size:14px; max-width:400px; }
+  .photo-lightbox .lb-close{ position:absolute; top:20px; right:20px; background:none; border:none; color:#fff; font-size:24px; cursor:pointer; }
+  .photo-lightbox .lb-delete{ margin-top:14px; background:none; border:var(--border-w) solid var(--stamp); color:var(--stamp); padding:6px 14px; border-radius:var(--radius-pill); font-size:12px; cursor:pointer; }
+
+  .entry-list{ display:flex; flex-direction:column; gap:10px; }
+  .entry-item{
+    display:flex; gap:12px; background:var(--card-bg); border:var(--border-w) solid var(--ink); border-radius:var(--radius-card); padding:10px;
+  }
+  .entry-item.text-only{ background: var(--paper-dark); border-style:dashed; }
+  .entry-photo{
+    width:64px; height:64px; flex-shrink:0; border-radius:var(--radius-card); overflow:hidden; cursor:pointer; background:var(--paper-dark);
+  }
+  .entry-photo img{ width:100%; height:100%; object-fit:cover; }
+  .entry-body{ flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:4px; }
+  .entry-caption{ font-size:13.5px; color:var(--ink); line-height:1.5; word-break:break-word; }
+  .entry-meta{ display:flex; align-items:center; gap:8px; font-size:11px; color:var(--pencil); }
+  .entry-author{ display:flex; align-items:center; gap:4px; }
+  .entry-avatar-dot{ width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .entry-date{ font-family:'JetBrains Mono',monospace; }
+
+  .activity-feed{ display:flex; flex-direction:column; gap:6px; margin-bottom:20px; }
+  .activity-item{
+    display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+    font-size:12.5px; color:var(--ink-soft); padding:7px 10px; background:var(--paper-dark);
+    border-radius:var(--radius-card); border:var(--border-w) dashed var(--pencil);
+  }
+  .activity-item b{ color:var(--ink); font-weight:600; }
+  .activity-time{ font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--pencil); white-space:nowrap; flex-shrink:0; }
+
+  .entry-type-choice{ display:flex; gap:10px; margin-bottom:6px; }
+  .entry-type-btn{
+    flex:1; padding:16px 10px; border:var(--border-w) solid var(--ink); border-radius:var(--radius-card); background:var(--card-bg);
+    display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer; font-family:'Gowun Dodum',sans-serif;
+  }
+  .entry-type-btn .icon{ font-size:22px; }
+  .entry-type-btn:active{ transform: scale(0.97); }
+  .entry-type-btn.active{ background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+  .member-detail-header{ display:flex; flex-direction:column; align-items:center; gap:10px; padding: 10px 0 24px; }
+  .member-detail-header .avatar-circle{ width:76px; height:76px; font-size:28px; }
+  .member-detail-header .mname{ font-family:'Gowun Batang',serif; font-size:19px; font-weight:700; }
+
+  .assign-select-row{ display:flex; gap:8px; align-items:center; margin-top:10px; }
+
+  .wish-card{ background:var(--card-bg); border:var(--border-w) solid var(--ink); border-radius:var(--radius-card); padding:12px 14px; margin-bottom:10px; }
+  .wish-card .wtitle{ font-family:'Gowun Batang',serif; font-weight:700; font-size:15px; margin-bottom:2px; }
+  .wish-card .wauthor{ font-size:12px; color:var(--pencil); margin-bottom:6px; }
+  .wish-card .wnote{ font-size:12.5px; color:var(--ink-soft); margin-bottom:8px; }
+  .wish-card .wfooter{ display:flex; align-items:center; justify-content:space-between; }
+  .wish-card .wrequester{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--pencil); }
+  .match-alert{
+    background: var(--gold-bg); border:var(--border-w) solid var(--gold); border-radius:var(--radius-card); padding:10px 12px; margin-top:8px;
+    font-size:12.5px; color:var(--ink); display:flex; align-items:center; gap:8px;
+  }
+
+  .progress-wrap{ margin-top:8px; }
+  .progress-track{ height:7px; border:var(--border-w) solid var(--ink); border-radius:var(--radius-pill); overflow:hidden; background:var(--paper-dark); }
+  .progress-fill{ height:100%; background:var(--stamp); width:0%; }
+  .progress-text{ font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--pencil); margin-top:3px; }
+  .progress-range{ width:100%; accent-color:var(--stamp); }
+  .record-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+  .record-card{ background:var(--card-bg); border:var(--border-w) solid var(--ink); border-radius:var(--radius-card); overflow:hidden; box-shadow:2px 2px 0 var(--card-shadow); cursor:pointer; }
+  .record-card img{ width:100%; aspect-ratio:1/1; object-fit:cover; display:block; }
+  .record-card-body{ padding:9px 10px; }
+  .record-title{ font-family:'Gowun Batang',serif; font-weight:700; font-size:13px; line-height:1.35; }
+  .record-meta{ font-size:11px; color:var(--pencil); margin-top:4px; line-height:1.4; }
+
+  .toast{
+    position:fixed; bottom:100px; left:50%; transform:translateX(-50%) translateY(20px); background: var(--ink); color:var(--paper);
+    padding:10px 18px; border-radius:var(--radius-pill); font-size:13px; opacity:0; pointer-events:none; transition: all 0.25s; z-index:300; max-width:85%; text-align:center;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.error{ background: var(--stamp); }
+
+  ::-webkit-scrollbar{ width:0; height:0; }
+  @media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
