@@ -1413,14 +1413,17 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             currentView = 'members';
             return renderMembers();
         }
+        // "프로필 수정"은 서버가 항상 로그인한 본인 행만 고치기 때문에(멤버 id는 무시),
+        // 남의 페이지에서 눌러도 실제로는 내 프로필이 남의 정보로 덮어써지는 혼란만
+        // 생긴다 — 본인 페이지에서만 보여준다.
+        var isMine = getLoggedInMemberId() === id;
         return '<button class="back-btn" id="backToMembers">← 멤버 목록</button>'
             + '<div class="member-detail-header">'
             + '<div class="avatar-circle" style="' + avatarStyle(m.color) + '">' + avatarContent(m) + '</div>'
             + '<div class="mname">' + escapeHtml(m.name) + '</div>'
             + (m.bio ? '<p style="font-size:12.5px;color:var(--ink-soft);text-align:center;max-width:280px;line-height:1.5;margin-top:-4px;">' + escapeHtml(m.bio) + '</p>' : '')
-            + '<div style="display:flex;gap:14px;">'
-            + '<button class="edit-icon-btn" id="editMemberProfileBtn">프로필 수정</button>'
-            + '</div></div>'
+            + (isMine ? '<div style="display:flex;gap:14px;"><button class="edit-icon-btn" id="editMemberProfileBtn">프로필 수정</button></div>' : '')
+            + '</div>'
             + renderLibrarySection(id)
             + memberRecordsSectionHtml_(id);
     }
