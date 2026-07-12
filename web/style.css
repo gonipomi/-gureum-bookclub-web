@@ -56,6 +56,11 @@
     background: var(--paper);
     border-bottom: 2px solid var(--ink);
     padding: 14px 20px;
+    /* 홈 화면에 추가해서 열면(viewport-fit=cover + status-bar black-translucent)
+       상단바가 화면 맨 위(노치/상태표시줄 밑)까지 그대로 붙어서, 시계·와이파이
+       아이콘이랑 브랜드/새로고침 버튼이 겹쳐 눌리지도 않았다. 안전영역만큼 위쪽에
+       더 띄운다. */
+    padding-top: max(14px, env(safe-area-inset-top));
     display:flex; align-items:center; justify-content:space-between;
     flex-wrap:wrap; gap:10px;
   }
