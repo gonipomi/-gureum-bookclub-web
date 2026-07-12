@@ -33,6 +33,7 @@
     }
   }
   *{box-sizing:border-box; margin:0; padding:0;}
+  html{ scroll-behavior:smooth; }
   /* 브라우저(특히 iOS Safari)는 <button>에 CSS color를 상속시키지 않고 시스템 기본 글자색을
      적용하는 경우가 있어, 다크모드에서 색을 따로 안 준 버튼(찜하기 등)이 어두운 배경에
      검정 글씨로 남는 문제가 있었다. 전역으로 상속을 강제한다. */
@@ -111,10 +112,19 @@
   .section-label h2{ font-family:'Gowun Batang', serif; font-size:17px; font-weight:700; }
   .section-label .line{ flex:1; height:1px; background: repeating-linear-gradient(90deg, var(--pencil) 0 4px, transparent 4px 8px); opacity:0.5; }
 
+  /* 홈 화면 맨 위 바로가기 — 섹션이 많아서 스크롤해야 뭐가 있는지 알 수 있는 문제 완화 */
+  .home-quicknav{ display:flex; gap:6px; overflow-x:auto; margin-bottom:14px; padding-bottom:2px; -webkit-overflow-scrolling:touch; }
+  .home-quicknav-item{
+    flex-shrink:0; font-family:'Gowun Dodum',sans-serif; font-size:12px; color:var(--ink);
+    background:var(--paper-dark); border:var(--border-w) solid var(--ink); border-radius:var(--radius-pill);
+    padding:6px 12px; text-decoration:none; white-space:nowrap;
+  }
+
   /* 홈 화면 블록 — 내 공간(my-space)과 공용 공간을 색으로 구분한다 */
   .home-section{
     background:var(--card-bg); border:var(--border-w) solid var(--ink); border-radius:var(--radius-card);
     padding:14px; margin-bottom:16px; box-shadow:2px 2px 0 var(--card-shadow);
+    scroll-margin-top:84px; /* 상단 고정 헤더에 안 가리게 바로가기 스크롤 위치 보정 */
   }
   .home-section.my-space{ background:var(--gold-bg); border-color:var(--gold); }
   .home-section .exchange-banner{ margin-bottom:0; }
@@ -181,7 +191,9 @@
     .exchange-actions .heart-btn, .exchange-actions .btn-text{ font-size:11px; padding:6px 7px; }
   }
 
-  .book-card-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  /* align-items:start 없으면 그리드가 같은 줄의 카드끼리 높이를 맞춰 늘려서, 내용
+     짧은 카드도 옆 카드만큼 길어지고 아래쪽 버튼 줄이 밑으로 밀려 붕 뜬다. */
+  .book-card-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }
   .exchange-banner .book-card-grid, .modal-sheet .book-card-grid{ display:flex; flex-direction:column; }
   .due-card{
     background: var(--card-bg); border: var(--border-w) solid var(--ink); border-radius: var(--radius-stamp); box-shadow: 3px 3px 0 var(--card-shadow);

@@ -701,7 +701,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             }
             return '<div class="shelf-book" style="background:' + color + ';" data-book="' + b.id + '">' + badgeHtml + '<span class="spine-title">' + escapeHtml(b.title) + '</span></div>';
         };
-        var mySpaceHtml = !myId ? '' : '<div class="home-section my-space">'
+        var mySpaceHtml = !myId ? '' : '<div class="home-section my-space" id="home-myspace">'
             + '<div class="section-label" style="margin-bottom:8px;"><span class="num mono">★</span><h2>나의 서재</h2><span class="line"></span></div>'
             + (myShelfCombined.length
                 ? spineShelfOrEmpty_(myShelfCombined, mySpaceSpineHtml_, '') + '<p style="font-size:11px;color:var(--pencil);margin-top:8px;">' + mySpaceCountsHtml + '</p>'
@@ -710,20 +710,29 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 
         // ---------- 아래부터는 공용 공간 (클럽 전체) ----------
         var recentActivity = recentActivityHtml_();
-        var recentActivitySection = recentActivity ? '<div class="home-section">' + recentActivity + '</div>' : '';
+        var recentActivitySection = recentActivity ? '<div class="home-section" id="home-activity">' + recentActivity + '</div>' : '';
 
-        var readingSection = '<div class="home-section">'
+        var readingSection = '<div class="home-section" id="home-reading">'
             + '<div class="section-label"><span class="num mono">' + currentlyReading.length + '권</span><h2>우리가 지금 읽는 책</h2><span class="line"></span></div>'
             + '<div class="card-stack book-card-grid">' + (currentlyReading.length ? currentlyReading.map(bookCardHtml).join('') : '<p style="color:var(--pencil);font-size:13px;padding:8px 4px;">📖 지금 읽는 책이 없어요.</p>') + '</div>'
             + '</div>';
 
-        var exchangeSection = '<div class="home-section">'
+        var exchangeSection = '<div class="home-section" id="home-exchange">'
             + '<div class="section-label" style="margin-bottom:8px;"><span class="num mono">🤝</span><h2>우리 모임 교환일</h2><span class="line"></span></div>'
             + banner
             + '</div>';
 
+        // 홈에 섹션이 많아서 뭐가 있는지 한눈에 안 들어온다는 피드백 — 맨 위에 작은
+        // 바로가기를 둬서 원하는 섹션으로 바로 스크롤할 수 있게 한다.
+        var quickNavHtml = '<div class="home-quicknav">'
+            + (mySpaceHtml ? '<a href="#home-myspace" class="home-quicknav-item">★ 내 서재</a>' : '')
+            + (recentActivitySection ? '<a href="#home-activity" class="home-quicknav-item">🕓 활동</a>' : '')
+            + '<a href="#home-reading" class="home-quicknav-item">📖 읽는 책</a>'
+            + '<a href="#home-exchange" class="home-quicknav-item">🤝 교환일</a>'
+            + '</div>';
+
         // 순서: 나의 서재(내 공간) → 최근 활동 → 우리가 지금 읽는 책 → 교환일 (전부 공용 공간)
-        return mySpaceHtml + recentActivitySection + readingSection + exchangeSection;
+        return quickNavHtml + mySpaceHtml + recentActivitySection + readingSection + exchangeSection;
     }
 
     // ---------- 우리 서고 (전부 책등으로 꽂아서, 카테고리별로 구분) ----------
