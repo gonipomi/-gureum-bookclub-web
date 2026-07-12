@@ -67,19 +67,21 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     var currentView = 'home';
     var detailBookId = null;
     var detailMemberId = null;
-    var recordsCategory = 'book';
+    var recordsCategory = 'feed';
+    var recordsScope = 'ours';
     var shelfCategory = 'finished';
+    var shelfScope = 'ours';
     var exchangeViewMode = 'list';
     var exchangeCalendarMonthOffset = 0;
-    // ---------- 로그인 세션 (Supabase Auth 세션 + 현재 그룹의 membership id는 app.js가 관리) ----------
+    // ---------- 로그인 세션 (Supabase Auth 세션 + 로그인한 사람의 profile id는 app.js가 관리) ----------
     function getLoggedInMemberId() {
-        return window.__CURRENT_MEMBERSHIP_ID__ || null;
+        return window.__CURRENT_PROFILE_ID__ || null;
     }
     function setLoggedInMemberId(id) {
-        window.__CURRENT_MEMBERSHIP_ID__ = id || null;
+        window.__CURRENT_PROFILE_ID__ = id || null;
     }
     function clearLoggedInMemberId() {
-        window.__CURRENT_MEMBERSHIP_ID__ = null;
+        window.__CURRENT_PROFILE_ID__ = null;
     }
     function getLoggedInMember() {
         var id = getLoggedInMemberId();
@@ -187,6 +189,20 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var div = document.createElement('div');
         div.textContent = String(str);
         return div.innerHTML;
+    }
+    // 사진·댓글 좋아요 — books.photos/exchange_proposals.photos 배열 항목(사진·텍스트메모)과
+    // 그 안에 중첩된 댓글(photo.comments[])에 공용으로 쓰는 버튼. parentPhotoId가 있으면
+    // "그 사진의 댓글"을, 없으면 최상위 항목(사진/텍스트메모) 자체를 좋아요한다.
+    function recordHeartBtnHtml_(entityType, entityId, itemId, parentPhotoId, hearts) {
+        var myId = getLoggedInMemberId();
+        var list = hearts || [];
+        var liked = !!(myId && list.indexOf(myId) > -1);
+        return '<button class="record-heart-btn' + (liked ? ' liked' : '') + '"'
+            + ' data-heart-entity-type="' + entityType + '" data-heart-entity-id="' + escapeHtml(String(entityId)) + '"'
+            + ' data-heart-item-id="' + escapeHtml(itemId) + '"'
+            + (parentPhotoId ? ' data-heart-parent-photo-id="' + escapeHtml(parentPhotoId) + '"' : '')
+            + ' data-heart-liked="' + (liked ? '1' : '0') + '">'
+            + (liked ? '❤️' : '🤍') + (list.length ? ' ' + list.length : '') + '</button>';
     }
     function fmtDate(d) {
         if (!d)
@@ -297,6 +313,12 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 var m = getMember(r.memberId);
                 if (m) push(r.requestedAt, '💛 ' + escapeHtml(m.name) + '님이 <b>' + escapeHtml(b.title) + '</b> 읽기 신청', b.id);
             });
+            // 찜(hearts)은 시각(created 시점)을 저장하지 않는 가벼운 신호라 여기 못 넣는다 — SNS의
+            // "좋아요"처럼 매번 다 보여주면 피드가 시끄러워지니, 타임스탬프가 있는 추천만 넣는다.
+            (b.recommendations || []).forEach(function (r) {
+                var m = getMember(r.memberId);
+                if (m) push(r.createdAt, '⭐ ' + escapeHtml(m.name) + '님이 <b>' + escapeHtml(b.title) + '</b> 추천', b.id);
+            });
         });
         (state.wishlist || []).forEach(function (w) {
             var requester = getMember(w.requestedById);
@@ -320,17 +342,31 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         });
 
         events.sort(function (a, b) { return String(b.time).localeCompare(String(a.time)); });
-        events = events.slice(0, 8);
+        events = events.slice(0, 5);
         if (!events.length) return '';
         return '<div class="section-label" style="margin-bottom:8px;"><span class="num mono">🕓</span><h2>최근 활동</h2><span class="line"></span></div>'
             + '<div class="activity-feed">' + events.map(function (e) {
                 var attrs = e.bookId ? ' data-goto-book="' + e.bookId + '" style="cursor:pointer;"' : '';
-                return '<div class="activity-item"' + attrs + '>' + e.text + '<span class="activity-time">' + relativeTimeText_(e.time) + '</span></div>';
+                return '<div class="activity-item"' + attrs + '><span class="activity-item-text">' + e.text + '</span><span class="activity-time">' + relativeTimeText_(e.time) + '</span></div>';
             }).join('') + '</div>';
     }
     // 큐 항목은 {memberId, desiredDate} 형태. 예전 문자열 배열 데이터도 방어적으로 처리.
     function qMemberId(q) { return typeof q === 'string' ? q : (q && q.memberId); }
     function queueHasMember(queue, memberId) { return (queue || []).some(function (q) { return qMemberId(q) === memberId; }); }
+    // 책은 사람 소속이라 여러 그룹에 걸쳐 보이는데, 신청자가 지금 보는 그룹의 멤버가
+    // 아니면(다른 그룹에서 신청) get_state가 그 사람 이름을 안 줘서 getMember가 실패한다.
+    // 이럴 때 조용히 숨기지 말고 어느 그룹에서 왔는지 알려주고 전환 버튼을 준다.
+    function crossGroupRequestFallbackHtml_(r) {
+        var myGroups = window.__MY_MEMBERSHIPS__ || [];
+        var otherGroup = r.groupId ? myGroups.find(function (g) { return g.group_id === r.groupId; }) : null;
+        if (otherGroup) {
+            return '<div class="queue-item" style="flex-wrap:wrap;">'
+                + '<span class="qname" style="color:var(--pencil);">⏰ <b>' + escapeHtml(otherGroup.group_name) + '</b> 모임에서 신청이 왔어요.</span>'
+                + '<button class="btn-text" data-switch-group="' + escapeHtml(r.groupId) + '">' + escapeHtml(otherGroup.group_name) + '으로 전환하기</button>'
+                + '</div>';
+        }
+        return '<div class="queue-item" style="flex-wrap:wrap;"><span class="qname" style="color:var(--pencil);">다른 모임 멤버에게서 신청이 왔어요.</span></div>';
+    }
     function memberNamesText(memberIds) {
         return (memberIds || []).map(function (id) {
             var m = getMember(id);
@@ -372,6 +408,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             main.innerHTML = renderWishlist();
         else if (currentView === 'records')
             main.innerHTML = renderRecords();
+        else if (currentView === 'recommend')
+            main.innerHTML = renderRecommend();
         else if (currentView === 'bookDetail')
             main.innerHTML = renderBookDetail(detailBookId);
         else if (currentView === 'memberDetail')
@@ -395,7 +433,6 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var reader = getMember(b.currentReaderId);
         var owner = getMember(b.ownerId);
         var queue = b.queue || [];
-        var last = b.status === 'finished' ? lastReadSummary(b) : null;
         var matchedNext = b.nextExchangeDate ? queue.find(function (q) { return typeof q === 'object' && q.desiredDate === b.nextExchangeDate; }) : null;
         var matchedNextMember = matchedNext ? getMember(qMemberId(matchedNext)) : null;
         var recruitingProposal = (!b.nextExchangeDate && b.currentReaderId)
@@ -414,8 +451,6 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             statusHtml = '<span class="queue-empty">지금 읽는 사람 없음</span>';
         }
 
-        var ownerHtml = owner ? '<div class="date-range" style="margin-top:4px;">🏷 소장 · ' + escapeHtml(owner.name) + '</div>' : '';
-        var startHtml = b.startDate ? '<div class="date-range" style="margin-top:4px;">📖 읽기 시작 · ' + fmtDate(b.startDate) + '</div>' : '';
 
         var exchangeHtml = '';
         if (matchedNextMember && b.nextExchangeDate) {
@@ -481,15 +516,10 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             queueClass = 'queue-waiting-highlight';
         }
 
+        // 홈 카드는 최대한 압축 — 댓글은 미리보기 박스 대신 작은 배지만 두고, 실제로 달거나
+        // 읽는 건 책 상세에서 하도록 한다(입력창을 카드마다 두면 스크롤이 너무 길어짐).
         var comments = (b.photos || []).filter(function (p) { return p && p.type === 'comment' && p.caption; });
-        var commentHtml = '';
-        if (comments.length) {
-            var latestComment = comments[0];
-            var commentAuthor = getMember(latestComment.authorId);
-            commentHtml = '<div class="card-comment-preview has-comment">💬 댓글 ' + comments.length + '<span class="comment-count">' + (commentAuthor ? escapeHtml(commentAuthor.name) : '') + '</span><span class="comment-text">' + escapeHtml(latestComment.caption) + '</span></div>';
-        } else {
-            commentHtml = '<div class="card-comment-preview">💬 댓글 달기</div>';
-        }
+        var commentBadgeHtml = comments.length ? '<span class="card-comment-badge">💬 ' + comments.length + '</span>' : '';
 
         var myIdForCard = getLoggedInMemberId();
         var canHeartCard = !!myIdForCard && b.ownerId !== myIdForCard && !b.externalBorrow;
@@ -498,21 +528,33 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             ? '<button class="btn-text card-heart-toggle" data-heart-book="' + b.id + '" data-hearted="' + (isHeartedCard ? '1' : '0') + '">' + (isHeartedCard ? '❤️ 찜함' : '🤍 찜') + '</button>'
             : '';
 
+        // 압축 우선순위: 내가 처리해야 할 알림(readRequestHtml)이 있으면 그것만, 없으면
+        // 교환일 정보만 — 소장자·시작일·진행률·완독기록 같은 참고용 정보는 상세 페이지로 옮겼다.
+        var priorityLineHtml = readRequestHtml || exchangeHtml;
+
+        // "읽기 신청"은 남이 읽는 중인 책에 대기(찜)를 거는 버튼이라, 지금 읽는 사람이
+        // 나 자신이거나(내 책을 내가 읽는 중 포함) 이미 대기열·신청 중이면 눌러봐야
+        // 에러 토스트만 뜬다 — 그런 경우엔 버튼 자체를 안 보여준다.
+        var canJoinQueueCard = !!myIdForCard && b.status === 'reading' && b.currentReaderId
+            && myIdForCard !== b.currentReaderId
+            && !queueHasMember(queue, myIdForCard)
+            && !(b.queueRequests || []).some(function (r) { return r.memberId === myIdForCard; });
+        var joinQueueBtnHtml = canJoinQueueCard
+            ? '<button class="heart-btn heart-toggle" data-book="' + b.id + '">📖 읽기 신청</button>'
+            : '';
+
         return '<div class="due-card" data-book="' + b.id + '">' +
             '<div class="due-card-top">' +
             '<div class="book-thumb">' + bookThumbHtml(b) + '</div>' +
             '<div class="due-card-info">' +
             '<div class="title">' + escapeHtml(b.title) + '</div>' +
             '<div class="author">' + escapeHtml(b.author || '저자 미상') + '</div>' +
-            '<div class="stamp-row">' + statusHtml + '</div>' +
-            '<div class="due-card-extra">' +
-            ownerHtml + startHtml + progressBarHtml(b) + exchangeHtml + readRequestHtml +
-            (last ? '<div class="date-range" style="margin-top:4px;display:flex;align-items:center;gap:5px;"><span class="entry-avatar-dot" style="' + avatarStyle(last.member.color) + '"></span>' + escapeHtml(last.member.name) + ' · ' + last.range + '</div>' : '') +
-            '</div></div></div>' +
-            commentHtml +
+            '<div class="stamp-row">' + statusHtml + commentBadgeHtml + '</div>' +
+            (priorityLineHtml ? '<div class="due-card-extra">' + priorityLineHtml + '</div>' : '') +
+            '</div></div>' +
             '<div class="due-card-bottom">' +
             '<span class="' + queueClass + '">' + queueText + '</span>' +
-            '<button class="heart-btn heart-toggle" data-book="' + b.id + '">📖 읽기 신청</button>' +
+            joinQueueBtnHtml +
             heartCardBtn +
             '</div></div>';
     }
@@ -582,7 +624,6 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var proposals = visibleProposals_().sort(function (a, b) { return (b.votes || []).length - (a.votes || []).length; });
         var confirmedSection = '';
         if (confirmedDates.length) {
-            confirmedSection += '<div class="section-label" style="margin:0 0 8px;"><span class="num mono">D</span><h2>다음 교환</h2><span class="line"></span></div>';
             confirmedSection += '<div class="exchange-card-grid" style="' + (proposals.length ? 'margin-bottom:16px;' : '') + '">';
             confirmedSection += confirmedDates.map(function (d) {
                 var dday = daysUntil(d.date);
@@ -635,10 +676,54 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             banner = '<div class="exchange-banner" id="exchangeBanner" style="cursor:pointer;background:var(--paper-dark);color:var(--ink);border:1.5px dashed var(--pencil);"><span class="ex-icon">📅</span><div class="ex-text"><div class="ex-label" style="opacity:1;color:var(--pencil);">다음 교환일이 아직 없어요</div><div class="ex-date" style="font-size:14px;">탭해서 날짜 제안하기</div></div></div>';
         }
         var currentlyReading = state.books.filter(function (b) { return b.status === 'reading'; });
-        return banner +
-            recentActivityHtml_() +
-            '<div class="section-label"><span class="num mono">01</span><h2>지금 읽는 중</h2><span class="line"></span></div>' +
-            '<div class="card-stack book-card-grid">' + (currentlyReading.length ? currentlyReading.map(bookCardHtml).join('') : '<p style="color:var(--pencil);font-size:13px;padding:8px 4px;">📖 지금 읽는 책이 없어요.</p>') + '</div>';
+
+        // ---------- 나의 서재 (내 공간) — 읽는 중 + 다음에 읽을 책 + 대기 중인 책을 한 줄 책장으로 압축 ----------
+        var myReading = myId ? state.books.filter(function (b) { return b.currentReaderId === myId && b.status === 'reading'; }) : [];
+        var nextToReadBooks = myId ? state.books.filter(function (b) { return b.ownerId === myId && b.status === 'shelved' && b.wantToRead; }) : [];
+        var myQueuedBooks = myId ? state.books.filter(function (b) { return queueHasMember(b.queue, myId); }) : [];
+        var myShelfCombined = myReading.concat(nextToReadBooks, myQueuedBooks);
+        // 세 종류가 한 책장에 섞이면 뭐가 뭔지 구분이 안 되니, 책등 위에 작은 이모지 배지를 붙인다.
+        var mySpaceEmojiByBookId_ = {};
+        myReading.forEach(function (b) { mySpaceEmojiByBookId_[b.id] = '📖'; });
+        nextToReadBooks.forEach(function (b) { mySpaceEmojiByBookId_[b.id] = '📚'; });
+        myQueuedBooks.forEach(function (b) { mySpaceEmojiByBookId_[b.id] = '⏳'; });
+        var mySpaceCountsHtml = (myReading.length ? '📖 읽는 중 ' + myReading.length + '권' : '')
+            + (myReading.length && nextToReadBooks.length ? ' · ' : '')
+            + (nextToReadBooks.length ? '📚 다음에 읽을 책 ' + nextToReadBooks.length + '권' : '')
+            + ((myReading.length || nextToReadBooks.length) && myQueuedBooks.length ? ' · ' : '')
+            + (myQueuedBooks.length ? '⏳ 대기 중 ' + myQueuedBooks.length + '권' : '');
+        var mySpaceSpineHtml_ = function (b, i) {
+            var color = COLORS[i % COLORS.length];
+            var cover = b.coverUrl || (b.photos && b.photos[0] ? b.photos[0].url : null);
+            var badgeHtml = '<span class="shelf-book-badge">' + (mySpaceEmojiByBookId_[b.id] || '') + '</span>';
+            if (cover) {
+                return '<div class="shelf-book" style="background-image:url(\'' + cover + '\');background-size:cover;background-position:center;" data-book="' + b.id + '">' + badgeHtml + '</div>';
+            }
+            return '<div class="shelf-book" style="background:' + color + ';" data-book="' + b.id + '">' + badgeHtml + '<span class="spine-title">' + escapeHtml(b.title) + '</span></div>';
+        };
+        var mySpaceHtml = !myId ? '' : '<div class="home-section my-space">'
+            + '<div class="section-label" style="margin-bottom:8px;"><span class="num mono">★</span><h2>나의 서재</h2><span class="line"></span></div>'
+            + (myShelfCombined.length
+                ? spineShelfOrEmpty_(myShelfCombined, mySpaceSpineHtml_, '') + '<p style="font-size:11px;color:var(--pencil);margin-top:8px;">' + mySpaceCountsHtml + '</p>'
+                : '<p style="color:var(--pencil);font-size:13px;">아직 읽는 책도, 다음에 읽을 책도 없어요.</p>')
+            + '</div>';
+
+        // ---------- 아래부터는 공용 공간 (클럽 전체) ----------
+        var recentActivity = recentActivityHtml_();
+        var recentActivitySection = recentActivity ? '<div class="home-section">' + recentActivity + '</div>' : '';
+
+        var readingSection = '<div class="home-section">'
+            + '<div class="section-label"><span class="num mono">' + currentlyReading.length + '권</span><h2>우리가 지금 읽는 책</h2><span class="line"></span></div>'
+            + '<div class="card-stack book-card-grid">' + (currentlyReading.length ? currentlyReading.map(bookCardHtml).join('') : '<p style="color:var(--pencil);font-size:13px;padding:8px 4px;">📖 지금 읽는 책이 없어요.</p>') + '</div>'
+            + '</div>';
+
+        var exchangeSection = '<div class="home-section">'
+            + '<div class="section-label" style="margin-bottom:8px;"><span class="num mono">🤝</span><h2>우리 모임 교환일</h2><span class="line"></span></div>'
+            + banner
+            + '</div>';
+
+        // 순서: 나의 서재(내 공간) → 최근 활동 → 우리가 지금 읽는 책 → 교환일 (전부 공용 공간)
+        return mySpaceHtml + recentActivitySection + readingSection + exchangeSection;
     }
 
     // ---------- 우리 서고 (전부 책등으로 꽂아서, 카테고리별로 구분) ----------
@@ -687,14 +772,21 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         { key: 'reading', label: '읽는 중' },
         { key: 'unread', label: '아직 안 읽었어요' }
     ];
+    // "다음에 읽을 책"은 내 소장 도서 중 내가 우선순위로 찜한 것뿐이라, 그룹 전체를
+    // 섞어 보는 "우리 서고"에선 의미가 없다 — "내 서고"에서만 탭으로 노출한다.
+    var SHELF_NEXT_TO_READ_CATEGORY_ = { key: 'nextToRead', label: '다음에 읽을 책' };
     var SHELF_EMPTY_TEXT_ = {
         wish: '🔍 아직 등록된 책이 없어요. 갖고 있는 사람이 있는지 물어볼 책을 등록해보세요.',
         reading: '📖 지금 읽는 책이 없어요.',
         unread: '🌱 아직 아무도 안 읽은 책이 없어요.',
-        finished: '✅ 아직 다 읽은 책이 없어요.'
+        finished: '✅ 아직 다 읽은 책이 없어요.',
+        nextToRead: '🌱 다음에 읽을 책으로 찜한 게 없어요. 안 읽은 책 카드에서 체크해보세요.'
     };
-    function shelfCategoryList_(category, reading, finished, unread) {
-        return category === 'reading' ? reading : category === 'unread' ? unread : finished;
+    function shelfCategoryList_(category, reading, finished, unread, nextToRead) {
+        return category === 'reading' ? reading
+            : category === 'unread' ? unread
+            : category === 'nextToRead' ? (nextToRead || [])
+            : finished;
     }
     function shelfSearchFilter_(list, query) {
         var q = (query || '').trim().toLowerCase();
@@ -706,49 +798,70 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     function shelfCardsHtml_(category, list, emptyText) {
         if (!list.length) return '<p style="color:var(--pencil);font-size:13px;">' + emptyText + '</p>';
         var mapper;
+        // 마이페이지와 같은 카드(libraryBookCardHtml_)를 그대로 쓴다 — "다음에 읽을 책" 체크박스나
+        // 빠른 상태 변경 드롭다운을 마이페이지까지 안 들어가도 우리서고에서 바로 쓸 수 있게.
+        // memberId 자리에 b.ownerId를 넣으면, 그 책 주인이 로그인한 나 자신일 때만
+        // "내 책" 전용 컨트롤(체크박스/드롭다운/삭제)이 뜬다.
         if (category === 'wish') {
             mapper = wishCompactCardHtml_;
         } else if (category === 'reading') {
             mapper = function (b) {
                 var reader = getMember(b.currentReaderId);
-                return compactBookTileHtml_(b, '📖 ' + (reader ? escapeHtml(reader.name) + '님이 읽는 중' : '읽는 중'));
+                return libraryBookCardHtml_(b, b.ownerId, 'reading', '📖 ' + (reader ? escapeHtml(reader.name) + '님이 읽는 중' : '읽는 중'));
             };
         } else if (category === 'unread') {
             mapper = function (b) {
                 var owner = getMember(b.ownerId);
-                return compactBookTileHtml_(b, '🏷 ' + (owner ? escapeHtml(owner.name) + '님 소장' : '소장자 미상'));
+                return libraryBookCardHtml_(b, b.ownerId, 'shelved', '🏷 ' + (owner ? escapeHtml(owner.name) + '님 소장' : '소장자 미상'));
             };
+        } else if (category === 'nextToRead') {
+            mapper = function (b) { return libraryBookCardHtml_(b, b.ownerId, 'nextToRead'); };
         } else {
             mapper = function (b) {
                 var last = lastReadSummary(b);
-                return compactBookTileHtml_(b, last ? '✓ ' + escapeHtml(last.member.name) + '님 완독' : '✓ 완독');
+                var extra = last ? '✓ ' + escapeHtml(last.member.name) + '님 완독' : '✓ 완독';
+                return libraryBookCardHtml_(b, b.ownerId, 'finished', extra + (b.externalBorrow ? ' · 🏛 외부에서 빌려 읽음' : ''));
             };
         }
         return '<div class="card-stack library-compact-grid">' + list.map(mapper).join('') + '</div>';
     }
     function renderShelf() {
-        var reading = state.books.filter(function (b) { return b.status === 'reading'; });
-        var finished = state.books.filter(function (b) { return b.status === 'finished'; });
-        var unread = state.books.filter(function (b) { return b.status === 'shelved'; });
-        var counts = { finished: finished.length, reading: reading.length, unread: unread.length };
+        var myId = getLoggedInMemberId();
+        var scopeMine = shelfScope === 'mine';
+        var reading = state.books.filter(function (b) { return b.status === 'reading' && (!scopeMine || b.ownerId === myId); });
+        var finished = state.books.filter(function (b) { return b.status === 'finished' && (!scopeMine || b.ownerId === myId); });
+        var unread = state.books.filter(function (b) { return b.status === 'shelved' && (!scopeMine || b.ownerId === myId); });
+        var nextToRead = state.books.filter(function (b) { return b.status === 'shelved' && b.wantToRead && b.ownerId === myId; });
+        var counts = { finished: finished.length, reading: reading.length, unread: unread.length, nextToRead: nextToRead.length };
 
         // 맨 위: 소장도서·완독도서·읽는 중인 책을 한 서고에 다 같이 꽂아서 총 진열
         // ('이 책 찾아요'는 별도 탭이라 여기엔 포함하지 않는다 — 우리가 실제로 갖고 있는 책만 서고에 꽂는다)
         var combined = finished.concat(reading, unread);
-        var overviewHtml = spineShelfOrEmpty_(combined, bookSpineHtml_, '📚 아직 서고에 책이 없어요.');
+        var overviewHtml = spineShelfOrEmpty_(combined, bookSpineHtml_, scopeMine ? '📚 아직 등록한 책이 없어요.' : '📚 아직 서고에 책이 없어요.');
 
-        var tabsHtml = '<div class="shelf-category-tabs">' + SHELF_CATEGORIES_.map(function (c) {
+        // "우리 서고"(그룹 전체)와 "내 서고"(내 책만)를 오가는 스코프 토글 — 기본은 우리 서고.
+        // 아래 완독/읽는 중/아직 안 읽었어요 카테고리 탭과 층위가 다르다는 걸 보여주려고
+        // 책장 맨 위에, 더 작은 크기로 둔다.
+        var scopeHtml = '<div class="shelf-scope-tabs">'
+            + '<button class="btn-secondary' + (!scopeMine ? ' active' : '') + '" data-shelf-scope="ours">우리 서고</button>'
+            + '<button class="btn-secondary' + (scopeMine ? ' active' : '') + '" data-shelf-scope="mine">내 서고</button>'
+            + '</div>';
+
+        // "아직 안 읽었어요" 탭이 flex-wrap 때문에 둘째 줄에 혼자 남는 자리라,
+        // 책 추가 버튼을 같은 탭 목록 안에 넣어서 바로 그 옆에 붙인다.
+        var categories = scopeMine ? SHELF_CATEGORIES_.concat([SHELF_NEXT_TO_READ_CATEGORY_]) : SHELF_CATEGORIES_;
+        var tabsHtml = '<div class="shelf-category-tabs">' + categories.map(function (c) {
             return '<button class="btn-secondary' + (shelfCategory === c.key ? ' active' : '') + '" data-shelf-category="' + c.key + '">'
                 + escapeHtml(c.label) + ' ' + counts[c.key] + '권</button>';
-        }).join('') + '</div>';
+        }).join('') + '<button class="btn-secondary" id="addShelfBookBtn">＋ 책 추가</button></div>';
 
         var searchHtml = '<div class="assign-select-row" style="margin-bottom:12px;">'
             + '<input type="text" id="shelfSearchInput" class="input-plain" placeholder="제목·저자 검색" style="flex:1;">'
             + '</div>';
-        var currentList = shelfCategoryList_(shelfCategory, reading, finished, unread);
+        var currentList = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead);
         var bodyHtml = '<div id="shelfCardsBox">' + shelfCardsHtml_(shelfCategory, currentList, SHELF_EMPTY_TEXT_[shelfCategory]) + '</div>';
 
-        return overviewHtml + tabsHtml + searchHtml + bodyHtml;
+        return scopeHtml + overviewHtml + tabsHtml + searchHtml + bodyHtml;
     }
     function renderWishlist() {
         var wishes = state.wishlist || [];
@@ -895,53 +1008,293 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 + '</div></div></div>';
         }).join('') + '</div>';
     }
+    // 같은 사람이 같은 책(또는 같은 모임)에 여러 장을 남기면, 카드 하나로 묶어서 보여준다
+    // (기록이 쌓이면 그리드가 너무 빽빽해져서 보기 불편하다는 피드백 반영). items는 이미
+    // 최신순 정렬이라, 그룹의 첫 항목이 곧 그 그룹의 가장 최근 기록이 된다.
+    function groupRecordItems_(items) {
+        var groups = [];
+        var indexByKey = {};
+        items.forEach(function (r) {
+            var key = r.kind + ':' + r.entityId + ':' + (r.photo.authorId || '');
+            if (indexByKey[key] === undefined) {
+                indexByKey[key] = groups.length;
+                groups.push({ kind: r.kind, entityId: r.entityId, title: r.title, items: [r] });
+            } else {
+                groups[indexByKey[key]].items.push(r);
+            }
+        });
+        return groups;
+    }
     function recordGridHtml_(items) {
-        return '<div class="record-grid">' + items.map(function (r) {
+        var groups = groupRecordItems_(items);
+        return '<div class="record-grid">' + groups.map(function (g) {
+            var r = g.items[0];
             var author = getMember(r.photo.authorId);
+            var countBadge = g.items.length > 1 ? '<span class="record-count-badge">' + g.items.length + '</span>' : '';
             return '<div class="record-card" data-record-kind="' + r.kind + '" data-record-entity="' + escapeHtml(r.entityId) + '" data-record-photo="' + escapeHtml(r.photo.id) + '">' +
-                '<img src="' + photoDisplayUrl(r.photo) + '">' +
+                '<img src="' + photoDisplayUrl(r.photo) + '">' + countBadge +
                 '<div class="record-card-body"><div class="record-title">' + escapeHtml(r.title) + '</div>' +
                 '<div class="record-meta">' + (r.photo.caption ? escapeHtml(r.photo.caption) + '<br>' : '') +
-                (author ? escapeHtml(author.name) + ' · ' : '') + fmtDateFull((r.photo.createdAt || '').slice(0, 10)) + '</div></div></div>';
+                (author ? escapeHtml(author.name) + ' · ' : '') + relativeTimeText_(r.photo.createdAt) + '</div></div></div>';
         }).join('') + '</div>';
+    }
+    function collectRecommendItems_() {
+        var items = [];
+        state.books.forEach(function (b) {
+            (b.recommendations || []).forEach(function (r) {
+                items.push({ book: b, memberId: r.memberId, comment: r.comment, createdAt: r.createdAt });
+            });
+        });
+        items.sort(function (a, b) { return String(b.createdAt || '').localeCompare(String(a.createdAt || '')); });
+        return items;
+    }
+    function renderRecommend() {
+        var items = collectRecommendItems_();
+        if (!items.length) {
+            return '<div class="section-label"><span class="num mono">⭐</span><h2>추천</h2><span class="line"></span></div>'
+                + '<div class="empty-state"><div class="stamp-big">NO RECS YET</div><p>읽고 있거나 다 읽은 책 중에 좋았던 걸 추천해보세요. 책 상세 페이지에서 "이 책 추천해요"를 눌러주세요.</p></div>';
+        }
+        return '<div class="section-label"><span class="num mono">' + items.length + '개</span><h2>추천</h2><span class="line"></span></div>'
+            + '<div class="card-stack">' + items.map(function (it) {
+                var author = getMember(it.memberId);
+                return '<div class="due-card" style="cursor:pointer;" data-book="' + it.book.id + '">'
+                    + '<div class="due-card-top" style="align-items:center;">'
+                    + '<div class="book-thumb">' + bookThumbHtml(it.book) + '</div>'
+                    + '<div class="due-card-info">'
+                    + '<div class="title">' + escapeHtml(it.book.title) + '</div>'
+                    + '<div class="author">' + escapeHtml(it.book.author || '저자 미상') + '</div>'
+                    + '</div></div>'
+                    + '<div class="due-card-bottom" style="flex-direction:column;align-items:flex-start;gap:4px;">'
+                    + (it.comment ? '<p style="font-size:13px;color:var(--ink);line-height:1.5;margin:0;">' + escapeHtml(it.comment) + '</p>' : '')
+                    + '<div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--pencil);">'
+                    + (author ? '<span class="entry-avatar-dot" style="' + avatarStyle(author.color) + '"></span>' + escapeHtml(author.name) : '')
+                    + ' · ' + relativeTimeText_(it.createdAt)
+                    + '</div></div></div>';
+            }).join('') + '</div>';
+    }
+    // 통합 피드 — 책 사진/모임 사진/후기를 종류 안 가리고 시간순으로 섞는다(홈 화면의
+    // "최근 활동"과 같은 접근). 기존 3분할(책 기록/모임 기록/후기)은 이 피드 위의
+    // 필터로 격하됐고, 기본 화면은 이제 "전체" 피드다.
+    function feedPhotoGroupHtml_(g) {
+        var r = g.items[0];
+        var author = getMember(r.photo.authorId);
+        var countBadge = g.items.length > 1 ? ' <span class="entry-count-badge">+' + (g.items.length - 1) + '</span>' : '';
+        return '<div class="entry-item" data-record-kind="' + r.kind + '" data-record-entity="' + escapeHtml(r.entityId) + '" data-record-photo="' + escapeHtml(r.photo.id) + '" style="cursor:pointer;">'
+            + '<div class="entry-photo"><img src="' + photoDisplayUrl(r.photo) + '"></div>'
+            + '<div class="entry-body">'
+            + '<div class="entry-caption"><b>' + escapeHtml(r.title) + '</b>' + countBadge + (r.photo.caption ? '<br>' + escapeHtml(r.photo.caption) : '') + '</div>'
+            + '<div class="entry-meta">'
+            + (author ? '<span class="entry-author"><span class="entry-avatar-dot" style="' + avatarStyle(author.color) + '"></span>' + escapeHtml(author.name) + '</span>' : '')
+            + '<span class="entry-date">' + relativeTimeText_(r.photo.createdAt) + '</span>'
+            + recordHeartBtnHtml_(r.kind, r.entityId, r.photo.id, null, r.photo.hearts)
+            + '</div></div></div>';
+    }
+    function feedReviewItemHtml_(r) {
+        var author = getMember(r.memberId);
+        return '<div class="entry-item text-only" data-goto-book="' + r.book.id + '" style="cursor:pointer;">'
+            + '<div class="entry-body">'
+            + '<div class="entry-caption">✍️ <b>' + escapeHtml(r.book.title) + '</b><br>' + escapeHtml(r.review) + '</div>'
+            + '<div class="entry-meta">'
+            + (author ? '<span class="entry-author"><span class="entry-avatar-dot" style="' + avatarStyle(author.color) + '"></span>' + escapeHtml(author.name) + '</span>' : '')
+            + '<span class="entry-date">' + relativeTimeText_(r.date) + '</span>'
+            + '</div></div></div>';
+    }
+    function recordFeedHtml_() {
+        var photoEntries = groupRecordItems_(collectRecordItems_({})).map(function (g) {
+            return { time: g.items[0].photo.createdAt, html: feedPhotoGroupHtml_(g) };
+        });
+        var reviewEntries = collectReviewItems_().map(function (r) {
+            return { time: r.date, html: feedReviewItemHtml_(r) };
+        });
+        var combined = photoEntries.concat(reviewEntries);
+        combined.sort(function (a, b) { return String(b.time || '').localeCompare(String(a.time || '')); });
+        if (!combined.length) {
+            return '<div class="empty-state"><div class="stamp-big">NO RECORDS YET</div><p>사진이나 후기를 남기면 여기에 시간순으로 모여요.</p></div>';
+        }
+        return '<div class="entry-list">' + combined.map(function (x) { return x.html; }).join('') + '</div>';
     }
     function renderRecords() {
         var toggleHtml = '<div class="assign-select-row" style="margin-bottom:14px;flex-wrap:wrap;gap:8px;">'
+            + '<button class="btn-secondary' + (recordsCategory === 'feed' ? ' active' : '') + '" data-records-category="feed" style="flex:1;margin-top:0;">🕓 전체</button>'
             + '<button class="btn-secondary' + (recordsCategory === 'book' ? ' active' : '') + '" data-records-category="book" style="flex:1;margin-top:0;">📖 책 기록</button>'
             + '<button class="btn-secondary' + (recordsCategory === 'exchange' ? ' active' : '') + '" data-records-category="exchange" style="flex:1;margin-top:0;">🤝 모임 기록</button>'
             + '<button class="btn-secondary' + (recordsCategory === 'review' ? ' active' : '') + '" data-records-category="review" style="flex:1;margin-top:0;">✍️ 후기</button>'
             + '</div>';
 
-        if (recordsCategory === 'review') {
-            var reviewItems = collectReviewItems_();
-            return '<div class="section-label"><span class="num mono">' + reviewItems.length + '개</span><h2>독서기록</h2><span class="line"></span></div>' + toggleHtml
-                + reviewListHtml_(reviewItems);
+        if (recordsCategory === 'feed') {
+            return '<div class="section-label"><span class="num mono">🕓</span><h2>독서기록</h2><span class="line"></span></div>' + toggleHtml
+                + recordFeedHtml_();
         }
 
-        var items = collectRecordItems_({ category: recordsCategory });
-        var headerHtml = '<div class="section-label"><span class="num mono">' + items.length + '장</span><h2>독서기록</h2><span class="line"></span></div>' + toggleHtml;
-        if (!items.length) {
-            return headerHtml + '<div class="empty-state"><div class="stamp-big">NO PHOTOS YET</div><p>' + (recordsCategory === 'exchange' ? '교환일 상세에서 모임 사진을 남기면 여기에 모여요.' : '책 상세에서 사진을 남기면 여기에 모여요.') + '</p></div>';
+        if (recordsCategory === 'review') {
+            var reviewItems = collectReviewItems_();
+            var reviewAddBtnHtml = '<button class="btn-secondary" id="addReviewBtn" style="margin-bottom:14px;">＋ 기록 추가</button>';
+            return '<div class="section-label"><span class="num mono">' + reviewItems.length + '개</span><h2>독서기록</h2><span class="line"></span></div>' + toggleHtml
+                + reviewAddBtnHtml + reviewListHtml_(reviewItems);
         }
-        return headerHtml + recordGridHtml_(items);
+
+        // "책 기록"만 그룹 전체("우리 기록")와 내가 남긴 것("내 기록")을 오가는 스코프 토글을 둔다.
+        var scopeMine = recordsCategory === 'book' && recordsScope === 'mine';
+        var scopeHtml = '';
+        if (recordsCategory === 'book') {
+            scopeHtml = '<div class="assign-select-row" style="margin-bottom:12px;gap:8px;">'
+                + '<button class="btn-secondary' + (!scopeMine ? ' active' : '') + '" data-records-scope="ours" style="flex:1;margin-top:0;">우리 기록</button>'
+                + '<button class="btn-secondary' + (scopeMine ? ' active' : '') + '" data-records-scope="mine" style="flex:1;margin-top:0;">내 기록</button>'
+                + '</div>';
+        }
+        var items = collectRecordItems_({ category: recordsCategory, authorId: scopeMine ? getLoggedInMemberId() : null });
+        var headerHtml = '<div class="section-label"><span class="num mono">' + items.length + '장</span><h2>독서기록</h2><span class="line"></span></div>' + toggleHtml + scopeHtml;
+        var addBtnHtml = recordsCategory === 'book'
+            ? '<button class="btn-secondary" id="addRecordBtn" style="margin-bottom:14px;">＋ 기록 추가</button>'
+            : '<button class="btn-secondary" id="addExchangeRecordBtn" style="margin-bottom:14px;">＋ 기록 추가</button>';
+        if (!items.length) {
+            return headerHtml + addBtnHtml + '<div class="empty-state"><div class="stamp-big">NO PHOTOS YET</div><p>' + (scopeMine ? '아직 내가 남긴 책 사진이 없어요.' : (recordsCategory === 'exchange' ? '교환일 상세에서 모임 사진을 남기면 여기에 모여요.' : '책 상세에서 사진을 남기면 여기에 모여요.')) + '</p></div>';
+        }
+        return headerHtml + addBtnHtml + recordGridHtml_(items);
+    }
+    // 독서기록 탭 "＋ 기록 추가" — 책/교환일 상세 페이지까지 안 가도 바로 사진을 남길 수
+    // 있게, 대상(책 또는 교환일)부터 고르고 나면 상세 페이지와 같은 사진 캡션 모달
+    // (openPhotoCaptionModal)로 이어붙인다.
+    function recordBookPickerListHtml_(list) {
+        if (!list.length) return '<p style="color:var(--pencil);font-size:13px;">검색 결과가 없어요.</p>';
+        return list.map(function (b) {
+            return '<button class="due-card" style="cursor:pointer;text-align:left;padding:10px 12px;" data-pick-record-book="' + b.id + '">'
+                + '<div style="display:flex;align-items:center;gap:10px;">'
+                + '<div class="book-thumb" style="width:34px;height:48px;flex-shrink:0;">' + bookThumbHtml(b) + '</div>'
+                + '<div><div class="title" style="font-size:13.5px;">' + escapeHtml(b.title) + '</div>'
+                + '<div class="author" style="font-size:11.5px;">' + escapeHtml(b.author || '저자 미상') + '</div></div>'
+                + '</div></button>';
+        }).join('');
+    }
+    function pickRecordPhotoFile_(entityType, entityId) {
+        closeModal();
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = function (e) {
+            var file = e.target.files[0];
+            if (!file) return;
+            if (file.size > 4 * 1024 * 1024) {
+                showToast('사진 용량이 너무 커요 (4MB 이하)', true);
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function () { openPhotoCaptionModal(entityType, entityId, reader.result); };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    }
+    function openRecordBookPickerModal_() {
+        var books = (state.books || []).slice().sort(function (a, b) { return (a.title || '').localeCompare(b.title || ''); });
+        openModal('<h3>어떤 책 기록을 남길까요?</h3>'
+            + '<input type="text" id="recordBookPickerSearch" class="input-plain" placeholder="제목·저자 검색" style="width:100%;margin-bottom:10px;">'
+            + '<div class="card-stack" id="recordBookPickerList" style="gap:8px;max-height:50vh;overflow-y:auto;">' + recordBookPickerListHtml_(books) + '</div>');
+        function wirePickButtons() {
+            document.querySelectorAll('[data-pick-record-book]').forEach(function (btn) {
+                btn.onclick = function () { pickRecordPhotoFile_('book', btn.dataset.pickRecordBook); };
+            });
+        }
+        wirePickButtons();
+        document.getElementById('recordBookPickerSearch').oninput = function (e) {
+            var filtered = shelfSearchFilter_(books, e.target.value);
+            document.getElementById('recordBookPickerList').innerHTML = recordBookPickerListHtml_(filtered);
+            wirePickButtons();
+        };
+    }
+    // 모임 기록 추가 — 확정된 교환일과 모집 중인 제안 날짜를 합쳐서 고르게 한다
+    // (openDateRequestModal의 날짜 합치기 로직과 같은 방식).
+    function recordExchangeDatePickerListHtml_(dateMembers, dates) {
+        if (!dates.length) return '<p style="color:var(--pencil);font-size:13px;">아직 등록된 교환일이 없어요. 홈에서 교환일을 먼저 제안해보세요.</p>';
+        return dates.map(function (d) {
+            var names = memberNamesText((dateMembers[d] || []).filter(function (id, idx) { return dateMembers[d].indexOf(id) === idx; }));
+            return '<button class="due-card" style="cursor:pointer;text-align:left;padding:12px;" data-pick-record-date="' + d + '">'
+                + '<div>' + fmtDateFull(d) + '</div>'
+                + '<div style="font-size:11.5px;color:var(--pencil);margin-top:2px;font-weight:400;">' + (names ? escapeHtml(names) : '아직 아무도 없음') + '</div>'
+                + '</button>';
+        }).join('');
+    }
+    function openExchangeRecordPickerModal_() {
+        var dateMembers = {};
+        (state.confirmedExchangeDates || []).forEach(function (d) {
+            dateMembers[d.date] = (dateMembers[d.date] || []).concat(d.memberIds || []);
+        });
+        (state.exchangeProposals || []).forEach(function (p) {
+            dateMembers[p.date] = (dateMembers[p.date] || []).concat(p.votes || []);
+        });
+        var dates = Object.keys(dateMembers).sort().reverse();
+        openModal('<h3>어떤 모임 기록을 남길까요?</h3>'
+            + '<div class="card-stack" style="gap:8px;max-height:55vh;overflow-y:auto;">' + recordExchangeDatePickerListHtml_(dateMembers, dates) + '</div>');
+        document.querySelectorAll('[data-pick-record-date]').forEach(function (btn) {
+            btn.onclick = function () { pickRecordPhotoFile_('exchange', btn.dataset.pickRecordDate); };
+        });
+    }
+    // 후기 추가/수정 — 내가 실제로 완독한 책만 고를 수 있고, 이미 쓴 후기가 있으면
+    // 수정하는 형태로 이어진다.
+    function reviewPickerListHtml_(list, myId) {
+        if (!list.length) return '<p style="color:var(--pencil);font-size:13px;">아직 완독한 책이 없어요.</p>';
+        return list.map(function (b) {
+            var mine = (b.history || []).slice().reverse().find(function (h) { return h.memberId === myId && h.endDate; });
+            var preview = mine && mine.review ? '✍️ ' + escapeHtml(mine.review.slice(0, 30)) + (mine.review.length > 30 ? '…' : '') : '후기 없음';
+            return '<button class="due-card" style="cursor:pointer;text-align:left;padding:10px 12px;" data-pick-review-book="' + b.id + '">'
+                + '<div style="display:flex;align-items:center;gap:10px;">'
+                + '<div class="book-thumb" style="width:34px;height:48px;flex-shrink:0;">' + bookThumbHtml(b) + '</div>'
+                + '<div><div class="title" style="font-size:13.5px;">' + escapeHtml(b.title) + '</div>'
+                + '<div class="author" style="font-size:11.5px;">' + escapeHtml(preview) + '</div></div>'
+                + '</div></button>';
+        }).join('');
+    }
+    function openReviewBookPickerModal_() {
+        requireLogin(function (myId) {
+            var myFinishedBooks = state.books.filter(function (b) {
+                return (b.history || []).some(function (h) { return h.memberId === myId && h.endDate; });
+            });
+            openModal('<h3>어떤 책 후기를 남길까요?</h3>'
+                + '<div class="card-stack" style="gap:8px;max-height:55vh;overflow-y:auto;">' + reviewPickerListHtml_(myFinishedBooks, myId) + '</div>');
+            document.querySelectorAll('[data-pick-review-book]').forEach(function (btn) {
+                btn.onclick = function () { openSetReviewModal_(btn.dataset.pickReviewBook, myId); };
+            });
+        });
+    }
+    function openSetReviewModal_(bookId, myId) {
+        var b = getBook(bookId);
+        var mine = (b.history || []).slice().reverse().find(function (h) { return h.memberId === myId && h.endDate; });
+        openModal('<h3>' + escapeHtml(b.title) + '</h3>'
+            + '<div class="field"><label>후기</label><textarea id="setReviewInput" placeholder="어떤 책이었나요?" maxlength="500">' + escapeHtml((mine && mine.review) || '') + '</textarea></div>'
+            + '<button class="btn-primary" id="saveReviewBtn">저장하기</button>');
+        document.getElementById('saveReviewBtn').onclick = async function (e) {
+            var review = document.getElementById('setReviewInput').value.trim();
+            setBtnLoading(e.target, '저장하는 중...');
+            try {
+                applyState(await callServer('setBookReview', bookId, myId, review));
+                closeModal();
+                render();
+                showToast('후기를 저장했어요');
+            } catch (err) {
+                showToast(err.message || '저장 실패', true);
+                resetBtn(e.target);
+            }
+        };
     }
     function renderMembers() {
         if (state.members.length === 0) {
             return "\n      <div class=\"empty-state\">\n        <div class=\"stamp-big\">NO MEMBERS YET</div>\n        <p>\uBA64\uBC84\uB97C \uCD94\uAC00\uD558\uBA74 \uC5EC\uAE30\uC5D0 \uD398\uC774\uC9C0\uAC00 \uC0DD\uACA8\uC694.</p>\n        <button class=\"btn-primary\" style=\"max-width:220px;margin:18px auto 0;\" id=\"emptyAddMemberBtn2\">\uBA64\uBC84 \uCD94\uAC00\uD558\uAE30</button>\n      </div>";
         }
-        return "\n    <div class=\"section-label\">\n      <span class=\"num mono\">".concat(state.members.length + '명', "</span>\n      <h2>\uBA64\uBC84</h2>\n      <span class=\"line\"></span>\n    </div>\n    <div class=\"card-stack\">\n      ").concat(state.members.map(function (m) {
+        return "\n    <div class=\"section-label\">\n      <span class=\"num mono\">".concat(state.members.length + '명', "</span>\n      <h2>\uBA64\uBC84</h2>\n      <span class=\"line\"></span>\n    </div>\n    <button class=\"btn-secondary\" id=\"inviteMemberBtn\" style=\"margin-bottom:14px;\">\uBA64\uBC84 \uCD08\uB300</button>\n    <div class=\"card-stack\">\n      ").concat(state.members.map(function (m) {
             var reading = state.books.find(function (b) { return b.currentReaderId === m.id && b.status === 'reading'; });
             var waiting = state.books.filter(function (b) { return queueHasMember(b.queue, m.id); });
             return "\n        <div class=\"due-card\" data-member=\"".concat(m.id, "\">\n          <div class=\"due-card-top\" style=\"align-items:center;\">\n            <div class=\"avatar-circle\" style=\"").concat(avatarStyle(m.color), "\">").concat(avatarContent(m), "</div>\n            <div class=\"due-card-info\">\n              <div class=\"title\" style=\"font-size:15px;\">").concat(escapeHtml(m.name), "</div>\n              <div class=\"author\">").concat(reading ? "\uC77D\uB294 \uC911: ".concat(escapeHtml(reading.title)) : '지금 읽는 책 없음', "</div>\n              ").concat(waiting.length ? "<div class=\"author\" style=\"color:var(--stamp);margin-top:2px;\">\u2661 \uCC1C: ".concat(waiting.map(function (b) { return escapeHtml(b.title); }).join(', '), "</div>") : '', "\n              ").concat(m.bio ? "<div class=\"author\" style=\"color:var(--pencil);margin-top:2px;font-style:italic;\">".concat(escapeHtml(m.bio.slice(0, 40))).concat(m.bio.length > 40 ? '…' : '', "</div>") : '', "\n            </div>\n            ").concat(reading ? "<div class=\"book-thumb\" style=\"width:40px;height:56px;flex-shrink:0;\">".concat(bookThumbHtml(reading), "</div>") : '', "\n          </div>\n        </div>");
         }).join(''), "\n    </div>\n  ");
     }
     // ---------- MEMBER DETAIL ----------
-    var BOOK_STATUS_LABELS = { reading: '읽는 중', finished: '완독', shelved: '안 읽음', borrowed: '빌려읽은 책', queued: '대기 중', wanted: '읽고 싶음' };
-    var BOOK_STATUS_COLORS = { reading: 'var(--stamp)', finished: 'var(--line-green)', shelved: 'var(--pencil)', borrowed: 'var(--gold)', queued: 'var(--stamp)', wanted: 'var(--gold)' };
+    var BOOK_STATUS_LABELS = { reading: '읽는 중', finished: '완독', shelved: '안 읽음', queued: '대기 중', nextToRead: '다음에 읽을 책', wanted: '찜한 책' };
+    var BOOK_STATUS_COLORS = { reading: 'var(--stamp)', finished: 'var(--line-green)', shelved: 'var(--pencil)', queued: 'var(--stamp)', nextToRead: 'var(--gold)', wanted: 'var(--gold)' };
     function libraryGroupsForMember_(memberId) {
         var reading = state.books.filter(function (b) { return b.currentReaderId === memberId && b.status === 'reading'; });
         var queued = state.books.filter(function (b) { return queueHasMember(b.queue, memberId); });
-        var finished = [], borrowed = [], unread = [], wanted = [];
+        // "빌려서 읽은 책"도 이 사람이 읽은 책이므로 완독에 합친다 — 소장 여부는 별도 태그(🏷)로만 표시.
+        // "다음에 읽을 책"(내 소장, 우선순위)과 "찜한 책"(남의 책에 대한 관심 신호)은
+        // 의도가 달라서 따로 모은다 — 전자는 순수 개인 To-Read, 후자는 사회적 신호.
+        var finished = [], unread = [], nextToRead = [], hearted = [];
         var seen = {};
         state.books.forEach(function (b) {
             if (seen[b.id]) return;
@@ -951,18 +1304,17 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 finished.push(b);
             } else if (b.ownerId !== memberId && hasClosedHistory) {
                 seen[b.id] = true;
-                borrowed.push(b);
+                finished.push(b);
             } else if (b.ownerId === memberId && b.status === 'shelved') {
                 seen[b.id] = true;
-                (b.wantToRead ? wanted : unread).push(b);
+                (b.wantToRead ? nextToRead : unread).push(b);
             } else if (b.ownerId !== memberId && (b.hearts || []).indexOf(memberId) > -1) {
-                // 찜한(위시리스트) 다른 사람 책도 "읽고 싶은 책"에 같이 모인다
                 seen[b.id] = true;
-                wanted.push(b);
+                hearted.push(b);
             }
         });
         var wishItems = (state.wishlist || []).filter(function (w) { return w.requestedById === memberId; });
-        return { reading: reading, queued: queued, wanted: wanted, wishItems: wishItems, finished: finished, unread: unread, borrowed: borrowed };
+        return { reading: reading, queued: queued, nextToRead: nextToRead, hearted: hearted, wishItems: wishItems, finished: finished, unread: unread };
     }
     function libraryBookCardHtml_(b, memberId, labelKey, extraLine) {
         var isMine = getLoggedInMemberId() === memberId && b.ownerId === memberId;
@@ -970,7 +1322,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var owner = getMember(b.ownerId);
         var metaLine = b.ownerId !== memberId && owner ? '🏷 ' + escapeHtml(owner.name) + '님 소장' : '';
         var wantToReadToggle = (isMine && b.status === 'shelved')
-            ? '<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink);cursor:pointer;"><input type="checkbox" class="want-to-read-checkbox" data-want-book="' + b.id + '" ' + (b.wantToRead ? 'checked' : '') + ' style="width:15px;height:15px;">읽고 싶어요</label>'
+            ? '<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink);cursor:pointer;"><input type="checkbox" class="want-to-read-checkbox" data-want-book="' + b.id + '" ' + (b.wantToRead ? 'checked' : '') + ' style="width:15px;height:15px;">다음에 읽을 책</label>'
             : '';
         return '<div class="due-card" data-book="' + b.id + '">'
             + '<div class="due-card-top" style="align-items:center;">'
@@ -986,8 +1338,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 ? '<div class="due-card-bottom" style="flex-wrap:wrap;gap:8px;">'
                     + (b.externalBorrow
                         ? '<span style="font-size:11px;color:var(--pencil);">🏛 외부 대여 기록이라 상태를 바꿀 수 없어요</span>'
-                        : '<select class="library-status-select" data-status-book="' + b.id + '" style="padding:6px 8px;border:1.5px solid var(--ink);border-radius:var(--radius-card);background:var(--card-bg);font-size:12.5px;" ' + (b.currentReaderId && b.currentReaderId !== memberId ? 'disabled' : '') + '>'
-                            + '<option value="unread" ' + (b.status === 'shelved' ? 'selected' : '') + '>안 읽음</option>'
+                        : '<select class="library-status-select" data-status-book="' + b.id + '" style="padding:6px 8px;border:1.5px solid var(--ink);border-radius:var(--radius-card);background:var(--card-bg);color:var(--ink);font-size:12.5px;" ' + (b.currentReaderId && b.currentReaderId !== memberId ? 'disabled' : '') + '>'
+                            + '<option value="shelved" ' + (b.status === 'shelved' ? 'selected' : '') + '>안 읽음</option>'
                             + '<option value="reading" ' + (b.status === 'reading' ? 'selected' : '') + '>읽는 중</option>'
                             + '<option value="finished" ' + (b.status === 'finished' ? 'selected' : '') + '>완독</option>'
                             + '</select>'
@@ -1024,21 +1376,24 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             var pos = (b.queue || []).findIndex(function (q) { return qMemberId(q) === memberId; }) + 1;
             return libraryBookCardHtml_(b, memberId, 'queued', '대기 순번 ' + pos + '번째');
         }).join('');
-        var wantedCardsHtml = groups.wanted.map(function (b) { return libraryBookCardHtml_(b, memberId, 'wanted'); }).join('')
+        var nextToReadCardsHtml = groups.nextToRead.map(function (b) { return libraryBookCardHtml_(b, memberId, 'nextToRead'); }).join('');
+        var heartedCardsHtml = groups.hearted.map(function (b) { return libraryBookCardHtml_(b, memberId, 'wanted'); }).join('')
             + groups.wishItems.map(wishCompactCardHtml_).join('');
         var sections = [
             { key: 'reading', label: '읽는 중', color: BOOK_STATUS_COLORS.reading, count: groups.reading.length, html: groups.reading.map(function (b) { return libraryBookCardHtml_(b, memberId, 'reading'); }).join('') },
             { key: 'queued', label: '대기 중', color: BOOK_STATUS_COLORS.queued, count: groups.queued.length, html: queuedCardsHtml },
-            { key: 'wanted', label: '읽고 싶은 책', color: BOOK_STATUS_COLORS.wanted, count: groups.wanted.length + groups.wishItems.length, html: wantedCardsHtml, addBtn: true },
+            // "다음에 읽을 책"(내 소장, 순수 개인 우선순위)과 "찜한 책"(남의 책에 대한 관심 신호 + 위시리스트)은
+            // 의도가 달라서 분리했다 — 전자는 addBtn이 필요 없고(체크박스로만 표시), 후자만 새로 등록하는 버튼이 있다.
+            { key: 'nextToRead', label: '다음에 읽을 책', color: BOOK_STATUS_COLORS.nextToRead, count: groups.nextToRead.length, html: nextToReadCardsHtml },
             { key: 'finished', label: '완독', color: BOOK_STATUS_COLORS.finished, count: groups.finished.length, html: groups.finished.map(function (b) { return libraryBookCardHtml_(b, memberId, 'finished', b.externalBorrow ? '🏛 외부에서 빌려 읽음' : ''); }).join('') },
             { key: 'shelved', label: '안 읽음', color: BOOK_STATUS_COLORS.shelved, count: groups.unread.length, html: groups.unread.map(function (b) { return libraryBookCardHtml_(b, memberId, 'shelved'); }).join('') },
-            { key: 'borrowed', label: '빌려읽은 책', color: BOOK_STATUS_COLORS.borrowed, count: groups.borrowed.length, html: groups.borrowed.map(function (b) { return libraryBookCardHtml_(b, memberId, 'borrowed'); }).join('') }
+            { key: 'wanted', label: '찜한 책', color: BOOK_STATUS_COLORS.wanted, count: groups.hearted.length + groups.wishItems.length, html: heartedCardsHtml, addBtn: true }
         ];
         var totalCount = sections.reduce(function (sum, sec) { return sum + sec.count; }, 0);
         var body = sections.map(function (sec) {
             if (!sec.count && !sec.addBtn) return '';
             return '<div style="margin:12px 0 8px;display:flex;align-items:center;gap:10px;"><span class="stamp" style="color:' + sec.color + ';border-color:' + sec.color + ';">' + sec.label + ' ' + sec.count + '</span>'
-                + (sec.addBtn && isMineProfile ? '<button class="btn-text" id="addWishFromLibraryBtn">＋ 읽고 싶은 책 등록</button>' : '') + '</div>'
+                + (sec.addBtn && isMineProfile ? '<button class="btn-text" id="addWishFromLibraryBtn">＋ 이 책 찾아요 등록</button>' : '') + '</div>'
                 + (sec.count ? '<div class="card-stack library-compact-grid">' + sec.html + '</div>' : '');
         }).join('');
         return '<div class="section-label"><span class="num mono">📚</span><h2>서고</h2><span class="line"></span></div>'
@@ -1079,17 +1434,24 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var html = '';
         html += '<div class="member-detail-header"><div class="avatar-circle" style="' + avatarStyle(me.color) + '">' + avatarContent(me) + '</div><div class="mname">' + escapeHtml(me.name) + '의 마이페이지</div>';
         if (me.bio) html += '<p style="font-size:12.5px;color:var(--ink-soft);text-align:center;max-width:280px;line-height:1.5;margin-top:-4px;">' + escapeHtml(me.bio) + '</p>';
-        html += '<div><button class="edit-icon-btn" id="editMyProfileBtn">프로필 수정</button></div>';
+        html += '<div><button class="edit-icon-btn" id="editMyProfileBtn">프로필 수정</button><button class="edit-icon-btn" id="openAccountModalBtn">그룹 전환</button><button class="edit-icon-btn" id="myPageInviteCodeBtn">그룹 초대 코드</button></div>';
         html += '</div>';
+        // 내 서고가 마이페이지에서 제일 중요한 부분이라 맨 위로 (알림 설정 같은 부가 기능보다 먼저).
+        html += renderLibrarySection(myId);
+        html += memberRecordsSectionHtml_(myId);
         html += '<div class="section-label"><span class="num mono">✉</span><h2>알림 설정</h2><span class="line"></span></div>';
         html += '<div class="field"><label>이메일 주소</label><input type="email" id="notifyEmail" value="' + escapeHtml(me.email || '') + '" placeholder="you@example.com"></div>';
         html += '<div class="field"><label>알림 요일</label>' + dayCheckboxesHtml('memberDetail', me.notifyDays || []) + '</div>';
         html += '<div class="field"><label>알림 시간</label><input type="time" id="notifyTime" value="' + (me.notifyTime || '21:00') + '"></div>';
         html += '<div style="display:flex;align-items:center;gap:8px;margin:6px 0 14px;"><input type="checkbox" id="notifyEnabled" ' + (me.notifyEnabled ? 'checked' : '') + ' style="width:18px;height:18px;"><label for="notifyEnabled" style="font-size:13px;color:var(--ink);cursor:pointer;">알림 받기</label></div>';
         html += '<p style="font-size:11.5px;color:var(--pencil);margin-bottom:10px;line-height:1.5;">내가 읽는 책이나 찜한 책이 있을 때, 설정한 요일·시간대에 이메일로 알려드려요.</p>';
+        html += '<p style="font-size:12.5px;color:var(--ink);font-weight:600;margin-bottom:6px;">반응 알림 (즉시 발송)</p>';
+        html += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">'
+            + '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);cursor:pointer;"><input type="checkbox" id="notifyOnComment" ' + (me.notifyOnComment !== false ? 'checked' : '') + ' style="width:18px;height:18px;">누가 내 사진에 댓글을 달면</label>'
+            + '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);cursor:pointer;"><input type="checkbox" id="notifyOnHeart" ' + (me.notifyOnHeart !== false ? 'checked' : '') + ' style="width:18px;height:18px;">누가 내 사진·댓글에 좋아요를 누르면</label>'
+            + '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);cursor:pointer;"><input type="checkbox" id="notifyOnRecommend" ' + (me.notifyOnRecommend !== false ? 'checked' : '') + ' style="width:18px;height:18px;">내가 읽는 책을 누가 추천하면</label>'
+            + '</div>';
         html += '<button class="btn-primary" id="saveNotifyBtn" style="margin-bottom:18px;">알림 설정 저장</button>';
-        html += renderLibrarySection(myId);
-        html += memberRecordsSectionHtml_(myId);
         return html;
     }
 
@@ -1128,6 +1490,20 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var canHeart = !!myId && b.ownerId !== myId && !b.externalBorrow;
         var isHearted = !!(myId && (b.hearts || []).indexOf(myId) > -1);
         var currentReader = getMember(b.currentReaderId);
+        // 이 책 추천해요 — 실제로 읽어본 사람만(책주인·지금 읽는 사람·읽은 기록이 있는 사람) 가능
+        var myRecommendation = (b.recommendations || []).find(function (r) { return r.memberId === myId; });
+        var hasReadThisBook = !!myId && (b.ownerId === myId || b.currentReaderId === myId
+            || (b.history || []).some(function (h) { return h.memberId === myId; }));
+        var canRecommend = hasReadThisBook;
+        // 내 소장 미독서 책만 "다음에 읽을 책"으로 표시할 수 있다(우리서고 카드와 같은 체크박스).
+        var wantToReadToggleHtml = (myId === b.ownerId && b.status === 'shelved')
+            ? '<div style="margin-top:6px;"><label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink);cursor:pointer;"><input type="checkbox" class="want-to-read-checkbox" data-want-book="' + b.id + '" ' + (b.wantToRead ? 'checked' : '') + ' style="width:15px;height:15px;">다음에 읽을 책</label></div>'
+            : '';
+        // 이미 등록된 읽기 시작일/완독일도 나중에 고칠 수 있게 하는 연필 버튼.
+        var canEditStartDate = b.status === 'reading' && !!myId && (myId === b.ownerId || myId === b.currentReaderId);
+        var startDateEditBtnHtml = canEditStartDate ? ' <button class="btn-text" id="editStartDateBtn" style="padding:0;text-decoration:underline;">수정</button>' : '';
+        var lastHistoryEntry = (b.history || [])[(b.history || []).length - 1] || null;
+        var canEditLastHistory = b.status === 'finished' && !!myId && !!lastHistoryEntry && (myId === b.ownerId || myId === lastHistoryEntry.memberId);
         // 날짜 없이 대기 중인 사람에게, 뒤에서 경쟁자가 나타났음을 알려주는 배너.
         // ("읽기 신청"에 날짜를 필수로 만드는 대신, 실제로 경쟁이 생겼을 때만 알려준다)
         var myQueueEntry = queue.find(function (q) { return qMemberId(q) === myId; });
@@ -1196,7 +1572,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 finishedActionHtml += '<div class="queue-list" style="margin-bottom:12px;">';
                 finishedActionHtml += incomingReadRequests.map(function (r) {
                     var m = getMember(r.memberId);
-                    if (!m) return '';
+                    if (!m) return crossGroupRequestFallbackHtml_(r);
                     var dateText = r.desiredDate ? fmtDate(r.desiredDate) + ' 희망' : '날짜는 나중에';
                     return '<div class="queue-item" style="flex-wrap:wrap;">'
                         + '<div class="qavatar" style="' + avatarStyle(m.color) + '">' + avatarContent(m) + '</div>'
@@ -1241,7 +1617,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 queueActionHtml += '<div class="queue-list" style="margin-bottom:12px;">';
                 queueActionHtml += incomingRequests.map(function (r) {
                     var m = getMember(r.memberId);
-                    if (!m) return '';
+                    if (!m) return crossGroupRequestFallbackHtml_(r);
                     var dateText = r.desiredDate ? fmtDate(r.desiredDate) + ' 희망' : '날짜는 나중에';
                     return '<div class="queue-item" style="flex-wrap:wrap;">'
                         + '<div class="qavatar" style="' + avatarStyle(m.color) + '">' + avatarContent(m) + '</div>'
@@ -1255,63 +1631,179 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             }
 
             if (myId && myId !== b.currentReaderId) {
-                queueActionHtml += '<div class="field" style="margin-top:16px;"><label>읽기 신청</label>';
                 if (myQueued) {
-                    queueActionHtml += '<button class="heart-btn" id="removeMyQueueBtn">대기열에서 빠지기</button>';
+                    queueActionHtml += '<div class="field" style="margin-top:16px;"><button class="heart-btn" id="removeMyQueueBtn">대기열에서 빠지기</button></div>';
                 }
                 else if (myQueueRequest_1 && myQueueRequest_1.counterDate) {
-                    queueActionHtml += '<p style="font-size:12.5px;color:var(--pencil);margin-bottom:8px;">' + escapeHtml((reader || {}).name || '읽는 사람') + '님이 ' + fmtDate(myQueueRequest_1.counterDate) + '을 제안했어요.</p>'
+                    queueActionHtml += '<div class="field" style="margin-top:16px;"><label>읽기 신청</label><p style="font-size:12.5px;color:var(--pencil);margin-bottom:8px;">' + escapeHtml((reader || {}).name || '읽는 사람') + '님이 ' + fmtDate(myQueueRequest_1.counterDate) + '을 제안했어요.</p>'
                         + '<button class="heart-btn" data-accept-queue-request="' + myQueueRequest_1.id + '" data-queue-book="' + b.id + '">수락</button>'
-                        + '<button class="btn-text" style="color:var(--stamp);" data-reject-queue-request="' + myQueueRequest_1.id + '" data-queue-book="' + b.id + '">거절</button>';
+                        + '<button class="btn-text" style="color:var(--stamp);" data-reject-queue-request="' + myQueueRequest_1.id + '" data-queue-book="' + b.id + '">거절</button></div>';
                 }
                 else if (myQueueRequest_1) {
-                    queueActionHtml += '<p style="font-size:12.5px;color:var(--pencil);margin-bottom:8px;">신청했어요. 지금 읽는 사람의 응답을 기다리는 중이에요.</p>'
-                        + '<button class="btn-secondary" data-reject-queue-request="' + myQueueRequest_1.id + '" data-queue-book="' + b.id + '">신청 취소</button>';
+                    queueActionHtml += '<div class="field" style="margin-top:16px;"><label>읽기 신청</label><p style="font-size:12.5px;color:var(--pencil);margin-bottom:8px;">신청했어요. 지금 읽는 사람의 응답을 기다리는 중이에요.</p>'
+                        + '<button class="btn-secondary" data-reject-queue-request="' + myQueueRequest_1.id + '" data-queue-book="' + b.id + '">신청 취소</button></div>';
                 }
                 else {
-                    queueActionHtml += '<button class="heart-btn" id="addMyQueueBtn">📖 읽기 신청</button>';
+                    queueActionHtml += '<div class="field" style="margin-top:16px;"><button class="heart-btn" id="addMyQueueBtn">📖 읽기 신청</button></div>';
                 }
-                queueActionHtml += '</div>';
             }
             else if (!myId) {
-                queueActionHtml += '<div class="field" style="margin-top:16px;"><label>읽기 신청</label><button class="heart-btn" id="loginForQueueBtn">로그인하고 신청하기</button></div>';
+                queueActionHtml += '<div class="field" style="margin-top:16px;"><button class="heart-btn" id="loginForQueueBtn">로그인하고 신청하기</button></div>';
             }
         }
-        return "\n    <button class=\"back-btn\" id=\"backToHome\">\u2190 \uBAA9\uB85D\uC73C\uB85C</button>\n    <div class=\"detail-header\">\n      <div class=\"detail-thumb\">".concat(bookThumbHtml(b, 'detail'), "</div>\n      <div style=\"flex:1;\">\n        <div class=\"detail-title\">").concat(escapeHtml(b.title), "</div>\n        <div class=\"detail-author\">").concat(escapeHtml(b.author || '저자 미상'), "</div>\n        <div class=\"detail-author\">책주인: ").concat(owner ? escapeHtml(owner.name) : '알 수 없음', "</div>\n        ").concat(reader ? "<span class=\"stamp\">READING</span> <span class=\"reader-name\">".concat(escapeHtml(reader.name), "</span>") : (b.status === 'finished' ? "<span class=\"stamp done\">DONE</span>" + (b.externalBorrow ? " <span class=\"stamp\" style=\"color:var(--pencil);border-color:var(--pencil);\">\uD83C\uDFDB \uC678\uBD80 \uB300\uC5EC</span>" : "") : "<span class=\"queue-empty\">\uC9C0\uAE08 \uC77D\uB294 \uC0AC\uB78C \uC5C6\uC74C</span>"), "" + (canHeart ? "\n        <div style=\"margin-top:6px;\"><button class=\"heart-btn\" id=\"toggleHeartBtn\">" + (isHearted ? "\u2764\uFE0F \ucc1c\ud568" : "\ud83e\udd0d \ucc1c\ud558\uae30") + "</button></div>" : "") + "\n        <div><button class=\"edit-icon-btn\" id=\"editBookInfoBtn\">\uC81C\uBAA9\u00B7\uC800\uC790 \uC218\uC815</button>" + (canDelete ? "<button class=\"edit-icon-btn\" style=\"color:var(--stamp);\" id=\"deleteBookBtn\">\uCC45 \uC0AD\uC81C</button>" : "") + "</div>\n      </div>\n    </div>\n\n    " + nudgeBannerHtml + "\n\n    <div style=\"display:flex;gap:8px;margin-bottom:16px;\">\n      <a class=\"btn-secondary\" style=\"margin-top:0;text-align:center;text-decoration:none;flex:1;\" target=\"_blank\" rel=\"noopener\" href=\"https://www.google.com/search?q=").concat(encodeURIComponent(b.title + ' ' + (b.author || '')), "\">\uD83D\uDD0D \uAD6C\uAE00\uC5D0\uC11C \uBCF4\uAE30</a>\n      <a class=\"btn-secondary\" style=\"margin-top:0;text-align:center;text-decoration:none;flex:1;\" target=\"_blank\" rel=\"noopener\" href=\"https://www.aladin.co.kr/search/wsearchresult.aspx?SearchTarget=Book&SearchWord=").concat(encodeURIComponent(b.title), "\">\uD83D\uDCD7 \uC54C\uB77C\uB518\uC5D0\uC11C \uBCF4\uAE30</a>\n    </div>\n\n    <div class=\"info-grid\">\n      <div class=\"info-box\">\n        <div class=\"ib-label\">\uC2DC\uC791\uC77C</div>\n        <div class=\"ib-value\">").concat(b.startDate ? fmtDateFull(b.startDate) : '—', "</div>\n      </div>\n      <div class=\"info-box\">\n        <div class=\"ib-label\">\uC774 \uCC45\uC758 \uAD50\uD658\uC77C</div>\n        <div class=\"ib-value\">").concat(b.nextExchangeDate ? fmtDateFull(b.nextExchangeDate) : '미정', "</div>\n      </div>\n      ").concat(b.publisher ? "\n      <div class=\"info-box\">\n        <div class=\"ib-label\">\uCD9C\uD310\uC0AC</div>\n        <div class=\"ib-value\">".concat(escapeHtml(b.publisher), "</div>\n      </div>") : '', "\n      ").concat(b.isbn13 ? "\n      <div class=\"info-box\">\n        <div class=\"ib-label\">ISBN</div>\n        <div class=\"ib-value mono\" style=\"font-size:11px;\">".concat(escapeHtml(b.isbn13), "</div>\n      </div>") : '', "\n    </div>\n\n    ").concat(b.status === 'reading' ? progressDetailHtml(b) : '', "\n\n    ").concat(b.status !== 'finished' ? "\n      <div class=\"field\">\n        <label>\uC774 \uCC45\uC758 \uAD50\uD658\uC77C</label>\n        <div class=\"assign-select-row\">\n          <div class=\"info-box\" style=\"flex:1;\">\n            <div class=\"ib-value\">".concat(b.nextExchangeDate ? fmtDateFull(b.nextExchangeDate) : '아직 안 정함', "</div>\n          </div>\n          <button class=\"heart-btn\" id=\"openExchangeVoteBtn\">제안·참석</button>\n        </div>\n        ").concat(pickExchangeDateBtnHtml, "\n        <p style=\"font-size:11px;color:var(--pencil);margin-top:6px;\">이 책을 읽고 있는 사람이 날짜에 참석하면 이 책에 바로 반영돼요.</p>\n      </div>\n\n      <div class=\"field\">\n        ").concat(readActionHtml, "\n      </div>\n\n    ") : finishedActionHtml, "\n\n    ").concat((b.history || []).length ? "\n      <div class=\"section-label\"><span class=\"num mono\">H</span><h2>\uC77D\uC740 \uAE30\uB85D</h2><span class=\"line\"></span></div>\n      <div class=\"queue-list\" style=\"margin-bottom:6px;\">\n        ".concat(__spreadArray([], __read((b.history || [])), false).reverse().map(function (h) {
-            var m = getMember(h.memberId);
-            if (!m)
-                return '';
-            var range = h.endDate ? "".concat(fmtDateFull(h.startDate), " ~ ").concat(fmtDateFull(h.endDate)) : "".concat(fmtDateFull(h.startDate), " ~ \uC77D\uB294 \uC911");
-            var reviewHtml = h.review ? "<p style=\"font-size:12.5px;color:var(--ink-soft);line-height:1.5;margin:2px 0 8px 42px;\">".concat(escapeHtml(h.review), "</p>") : '';
-            return "<div class=\"queue-item\">\n            <div class=\"qavatar\" style=\"".concat(avatarStyle(m.color), "\">").concat(avatarContent(m), "</div>\n            <span class=\"qname\">").concat(escapeHtml(m.name), "</span>\n            <span class=\"date-range\">").concat(range, "</span>\n          </div>").concat(reviewHtml);
-        }).join(''), "\n      </div>\n    ") : '', "\n\n    <div class=\"section-label\"><span class=\"num mono\">Q</span><h2>\uB300\uAE30\uC5F4</h2><span class=\"line\"></span></div>\n    ").concat(queue.length ? "\n      <div class=\"queue-list\">\n        ".concat(queue.map(function (q, i) {
-            var mid = qMemberId(q);
-            var m = getMember(mid);
-            if (!m)
-                return '';
-            var desired = (typeof q === 'object' && q.desiredDate) ? q.desiredDate : null;
-            var isMatch = desired && b.nextExchangeDate && desired === b.nextExchangeDate;
-            var canPassToNext = !!(myId && myId === b.ownerId && !b.pendingReturn && (!b.currentReaderId || b.currentReaderId === myId));
-            var canRemove = myId && (myId === mid || myId === b.currentReaderId || canPassToNext);
-            var qActionButtons = canRemove ? "<button class=\"btn-text\" style=\"color:var(--stamp);\" data-remove-queue=\"".concat(b.id, "\" data-remove-member=\"").concat(mid, "\">빼기</button>") : '';
-            if (myId === b.currentReaderId || canPassToNext) {
-                qActionButtons += "<button class=\"btn-text\" data-pass-to=\"".concat(mid, "\" data-pass-book=\"").concat(b.id, "\">넘기기</button>");
-                if (!desired) {
-                    var sharedDate_1 = (state.confirmedExchangeDates || []).find(function (d) { return d.memberIds.indexOf(myId) > -1 && d.memberIds.indexOf(mid) > -1; });
-                    if (sharedDate_1) {
-                        qActionButtons += "<button class=\"btn-text\" style=\"color:var(--gold);\" data-suggest-date=\"".concat(sharedDate_1.date, "\" data-suggest-member=\"").concat(mid, "\" data-suggest-book=\"").concat(b.id, "\">").concat(escapeHtml(m.name), "님과 이미 ").concat(fmtDate(sharedDate_1.date), "에 만나요 · 이 책도 제안</button>");
+
+        // ---------- 여기부터 화면에 보일 순서대로 조립한다 ----------
+        // (헤더 → 넛지 배너 → 주요 액션 → 대기열/신청 처리 → 진행률 → 읽은 기록 →
+        //  댓글 → 기록 사진 → 부가 정보(교환일 포함) 순. 교환일은 이제 우선순위가 낮아져
+        //  맨 아래 "부가 정보" 카드로 내렸다 — 예전엔 이 자리가 주요 액션 바로 위였다.)
+
+        var headerHtml = '<button class="back-btn" id="backToHome">← 목록으로</button>'
+            + '<div class="detail-header">'
+            + '<div class="detail-thumb">' + bookThumbHtml(b, 'detail') + '</div>'
+            + '<div style="flex:1;">'
+            + '<div class="detail-title">' + escapeHtml(b.title) + '</div>'
+            + '<div class="detail-author">' + escapeHtml(b.author || '저자 미상') + '</div>'
+            + '<div class="detail-author">책주인: ' + (owner ? escapeHtml(owner.name) : '알 수 없음') + '</div>'
+            + (reader
+                ? '<span class="stamp">READING</span> <span class="reader-name">' + escapeHtml(reader.name) + '</span>'
+                : (b.status === 'finished'
+                    ? '<span class="stamp done">DONE</span>' + (b.externalBorrow ? ' <span class="stamp" style="color:var(--pencil);border-color:var(--pencil);">🏛 외부 대여</span>' : '')
+                    : '<span class="queue-empty">지금 읽는 사람 없음</span>'))
+            + (canHeart ? '<div style="margin-top:6px;"><button class="heart-btn" id="toggleHeartBtn">' + (isHearted ? '❤️ 찜함' : '🤍 찜하기') + '</button></div>' : '')
+            + (canRecommend ? '<div style="margin-top:6px;"><button class="heart-btn" id="toggleRecommendBtn">' + (myRecommendation ? '⭐ 추천함' : '⭐ 이 책 추천해요') + '</button></div>' : '')
+            + wantToReadToggleHtml
+            + (canDelete ? '<div><button class="edit-icon-btn" id="editBookInfoBtn">제목·저자 수정</button><button class="edit-icon-btn" style="color:var(--stamp);" id="deleteBookBtn">책 삭제</button></div>' : '')
+            + '</div>'
+            + '</div>';
+
+        var mainActionHtml = b.status !== 'finished'
+            ? '<div class="field">' + readActionHtml + '</div>'
+            : finishedActionHtml;
+
+        var queueSectionHtml = '<div class="section-label"><span class="num mono">Q</span><h2>대기열</h2><span class="line"></span></div>'
+            + (queue.length
+                ? '<div class="queue-list">' + queue.map(function (q, i) {
+                    var mid = qMemberId(q);
+                    var m = getMember(mid);
+                    if (!m) return '';
+                    var desired = (typeof q === 'object' && q.desiredDate) ? q.desiredDate : null;
+                    var isMatch = desired && b.nextExchangeDate && desired === b.nextExchangeDate;
+                    var canPassToNext = !!(myId && myId === b.ownerId && !b.pendingReturn && (!b.currentReaderId || b.currentReaderId === myId));
+                    var canRemove = myId && (myId === mid || myId === b.currentReaderId || canPassToNext);
+                    var qActionButtons = canRemove ? '<button class="btn-text" style="color:var(--stamp);" data-remove-queue="' + b.id + '" data-remove-member="' + mid + '">빼기</button>' : '';
+                    if (myId === b.currentReaderId || canPassToNext) {
+                        qActionButtons += '<button class="btn-text" data-pass-to="' + mid + '" data-pass-book="' + b.id + '">넘기기</button>';
+                        if (!desired) {
+                            var sharedDate_1 = (state.confirmedExchangeDates || []).find(function (d) { return d.memberIds.indexOf(myId) > -1 && d.memberIds.indexOf(mid) > -1; });
+                            if (sharedDate_1) {
+                                qActionButtons += '<button class="btn-text" style="color:var(--gold);" data-suggest-date="' + sharedDate_1.date + '" data-suggest-member="' + mid + '" data-suggest-book="' + b.id + '">' + escapeHtml(m.name) + '님과 이미 ' + fmtDate(sharedDate_1.date) + '에 만나요 · 이 책도 제안</button>';
+                            }
+                        }
                     }
-                }
-            }
-            return "<div class=\"queue-item ".concat(i === 0 ? 'first' : '', "\" style=\"flex-wrap:wrap;\">\n            <span class=\"qnum mono\">").concat(i + 1, "</span>\n            <div class=\"qavatar\" style=\"").concat(avatarStyle(m.color), "\">").concat(avatarContent(m), "</div>\n            <span class=\"qname\">").concat(escapeHtml(m.name)).concat(desired ? " <span style=\"color:".concat(isMatch ? 'var(--stamp)' : 'var(--pencil)', ";font-weight:").concat(isMatch ? '700' : '400', ";\">").concat(isMatch ? '🔁 교환일 일치' : '· 희망', " ").concat(fmtDate(desired), "</span>") : '', "</span>\n            ").concat(i === 0 ? "<span class=\"qtag\">다음 차례</span>" : '', "\n            ").concat(qActionButtons, "\n          </div>");
-        }).join(''), "\n      </div>\n    ") : "<p style=\"color:var(--pencil);font-size:13px;\">아직 읽기 신청한 사람이 없어요.</p>", "\n\n    ").concat(queueActionHtml, "\n\n    <div class=\"section-label\"><span class=\"num mono\">C</span><h2>\uB313\uAE00</h2><span class=\"line\"></span></div>\n    <div class=\"assign-select-row\" style=\"margin-bottom:12px;\">\n      <input type=\"text\" id=\"quickCommentInput\" class=\"input-plain\" placeholder=\"\uC774\uAC70 \uC7AC\uBC0C\uC5B4? \uC9E7\uC740 \uD55C\uB9C8\uB514...\" maxlength=\"300\" style=\"flex:1;\">\n      <button class=\"heart-btn\" id=\"quickCommentBtn\" style=\"flex-shrink:0;\">\uB0A8\uAE30\uAE30</button>\n    </div>\n    <div class=\"entry-list\" style=\"margin-bottom:20px;\">\n      ").concat((b.photos || []).filter(function (p) { return p.type === 'comment'; }).length ? (b.photos || []).filter(function (p) { return p.type === 'comment'; }).map(function (p) {
-            var author = getMember(p.authorId);
-            return "\n        <div class=\"entry-item text-only\">\n          <div class=\"entry-body\">\n            <div class=\"entry-caption\">".concat(escapeHtml(p.caption), "</div>\n            <div class=\"entry-meta\">\n              ").concat(author ? "<span class=\"entry-author\"><span class=\"entry-avatar-dot\" style=\"".concat(avatarStyle(author.color), "\"></span>").concat(escapeHtml(author.name), "</span>") : '', "\n              <span class=\"entry-date\">").concat(fmtDateFull((p.createdAt || '').slice(0, 10)), "</span>\n              <button class=\"btn-text\" style=\"color:var(--stamp);margin-left:auto;\" data-delete-entry=\"").concat(p.id, "\">\uC0AD\uC81C</button>\n            </div>\n          </div>\n        </div>");
-        }).join('') : "<p style=\"color:var(--pencil);font-size:13px;\">\uC544\uC9C1 \uB313\uAE00\uC774 \uC5C6\uC5B4\uC694.</p>", "\n    </div>\n\n    <div class=\"section-label\"><span class=\"num mono\">P</span><h2>\uAE30\uB85D \uC0AC\uC9C4</h2><span class=\"line\"></span></div>\n    <button class=\"btn-secondary\" id=\"addEntryBtn\" style=\"margin-bottom:14px;\">\uFF0B \uC0AC\uC9C4 \uB0A8\uAE30\uAE30</button>\n    <div class=\"entry-list\">\n      ").concat((b.photos || []).filter(function (p) { return p.type === 'photo'; }).length ? (b.photos || []).filter(function (p) { return p.type === 'photo'; }).map(function (p) {
-            var author = getMember(p.authorId);
-            var idx = (b.photos || []).indexOf(p);
-            return "\n        <div class=\"entry-item\">\n          <div class=\"entry-photo\" data-lightbox=\"".concat(idx, "\"><img src=\"").concat(p.url, "\"></div>\n          <div class=\"entry-body\">\n            ").concat(p.caption ? "<div class=\"entry-caption\">".concat(escapeHtml(p.caption), "</div>") : '', "\n            <div class=\"entry-meta\">\n              ").concat(author ? "<span class=\"entry-author\"><span class=\"entry-avatar-dot\" style=\"".concat(avatarStyle(author.color), "\"></span>").concat(escapeHtml(author.name), "</span>") : '', "\n              <span class=\"entry-date\">").concat(fmtDateFull((p.createdAt || '').slice(0, 10)), "</span>\n              <button class=\"btn-text\" style=\"color:var(--stamp);margin-left:auto;\" data-delete-entry=\"").concat(p.id, "\">\uC0AD\uC81C</button>\n            </div>\n          </div>\n        </div>");
-        }).join('') : "<p style=\"color:var(--pencil);font-size:13px;\">\uC544\uC9C1 \uC0AC\uC9C4\uC774 \uC5C6\uC5B4\uC694. \uBC11\uC904 \uCE5C \uD398\uC774\uC9C0 \uC0AC\uC9C4\uC744 \uB0A8\uACA8\uBCF4\uC138\uC694.</p>", "\n    </div>\n    <input type=\"file\" id=\"photoFileInput\" accept=\"image/*\" style=\"display:none;\">\n  ");
+                    return '<div class="queue-item ' + (i === 0 ? 'first' : '') + '" style="flex-wrap:wrap;">'
+                        + '<span class="qnum mono">' + (i + 1) + '</span>'
+                        + '<div class="qavatar" style="' + avatarStyle(m.color) + '">' + avatarContent(m) + '</div>'
+                        + '<span class="qname">' + escapeHtml(m.name) + (desired ? ' <span style="color:' + (isMatch ? 'var(--stamp)' : 'var(--pencil)') + ';font-weight:' + (isMatch ? '700' : '400') + ';">' + (isMatch ? '🔁 교환일 일치' : '· 희망') + ' ' + fmtDate(desired) + '</span>' : '') + '</span>'
+                        + (i === 0 ? '<span class="qtag">다음 차례</span>' : '')
+                        + qActionButtons
+                        + '</div>';
+                }).join('') + '</div>'
+                : '<p style="color:var(--pencil);font-size:13px;">아직 읽기 신청한 사람이 없어요.</p>')
+            + queueActionHtml;
+
+        var historyHtml = (b.history || []).length
+            ? '<div class="section-label"><span class="num mono">H</span><h2>읽은 기록</h2><span class="line"></span></div>'
+                + '<div class="queue-list" style="margin-bottom:6px;">'
+                + [].concat(b.history || []).reverse().map(function (h, i) {
+                    var m = getMember(h.memberId);
+                    if (!m) return '';
+                    var range = h.endDate ? fmtDateFull(h.startDate) + ' ~ ' + fmtDateFull(h.endDate) : fmtDateFull(h.startDate) + ' ~ 읽는 중';
+                    var reviewHtml = h.review ? '<p style="font-size:12.5px;color:var(--ink-soft);line-height:1.5;margin:2px 0 8px 42px;">' + escapeHtml(h.review) + '</p>' : '';
+                    var editHtml = (i === 0 && canEditLastHistory) ? '<button class="btn-text" data-edit-last-history="1" style="padding:0;text-decoration:underline;margin-left:6px;">수정</button>' : '';
+                    return '<div class="queue-item">'
+                        + '<div class="qavatar" style="' + avatarStyle(m.color) + '">' + avatarContent(m) + '</div>'
+                        + '<span class="qname">' + escapeHtml(m.name) + '</span>'
+                        + '<span class="date-range">' + range + '</span>' + editHtml
+                        + '</div>' + reviewHtml;
+                }).join('')
+                + '</div>'
+            : '';
+
+        var commentsHtml = '<div class="section-label"><span class="num mono">C</span><h2>댓글</h2><span class="line"></span></div>'
+            + '<div class="assign-select-row" style="margin-bottom:12px;">'
+            + '<input type="text" id="quickCommentInput" class="input-plain" placeholder="이거 재밌어? 짧은 한마디..." maxlength="300" style="flex:1;">'
+            + '<button class="heart-btn" id="quickCommentBtn" style="flex-shrink:0;">남기기</button>'
+            + '</div>'
+            + '<div class="entry-list" style="margin-bottom:20px;">'
+            + ((b.photos || []).filter(function (p) { return p.type === 'comment'; }).length
+                ? (b.photos || []).filter(function (p) { return p.type === 'comment'; }).map(function (p) {
+                    var author = getMember(p.authorId);
+                    return '<div class="entry-item text-only">'
+                        + '<div class="entry-body">'
+                        + '<div class="entry-caption">' + escapeHtml(p.caption) + '</div>'
+                        + '<div class="entry-meta">'
+                        + (author ? '<span class="entry-author"><span class="entry-avatar-dot" style="' + avatarStyle(author.color) + '"></span>' + escapeHtml(author.name) + '</span>' : '')
+                        + '<span class="entry-date">' + fmtDateFull((p.createdAt || '').slice(0, 10)) + '</span>'
+                        + recordHeartBtnHtml_('book', b.id, p.id, null, p.hearts)
+                        + '<button class="btn-text" style="color:var(--stamp);margin-left:auto;" data-delete-entry="' + p.id + '">삭제</button>'
+                        + '</div></div></div>';
+                }).join('')
+                : '<p style="color:var(--pencil);font-size:13px;">아직 댓글이 없어요.</p>')
+            + '</div>';
+
+        var photosHtml = '<div class="section-label"><span class="num mono">P</span><h2>기록 사진</h2><span class="line"></span></div>'
+            + '<button class="btn-secondary" id="addEntryBtn" style="margin-bottom:14px;">＋ 사진 남기기</button>'
+            + '<div class="entry-list">'
+            + ((b.photos || []).filter(function (p) { return p.type === 'photo'; }).length
+                ? (b.photos || []).filter(function (p) { return p.type === 'photo'; }).map(function (p) {
+                    var author = getMember(p.authorId);
+                    var idx = (b.photos || []).indexOf(p);
+                    return '<div class="entry-item">'
+                        + '<div class="entry-photo" data-lightbox="' + idx + '"><img src="' + p.url + '"></div>'
+                        + '<div class="entry-body">'
+                        + (p.caption ? '<div class="entry-caption">' + escapeHtml(p.caption) + '</div>' : '')
+                        + '<div class="entry-meta">'
+                        + (author ? '<span class="entry-author"><span class="entry-avatar-dot" style="' + avatarStyle(author.color) + '"></span>' + escapeHtml(author.name) + '</span>' : '')
+                        + '<span class="entry-date">' + fmtDateFull((p.createdAt || '').slice(0, 10)) + '</span>'
+                        + recordHeartBtnHtml_('book', b.id, p.id, null, p.hearts)
+                        + '<button class="btn-text" style="color:var(--stamp);margin-left:auto;" data-delete-entry="' + p.id + '">삭제</button>'
+                        + '</div></div></div>';
+                }).join('')
+                : '<p style="color:var(--pencil);font-size:13px;">아직 사진이 없어요. 밑줄 친 페이지 사진을 남겨보세요.</p>')
+            + '</div>'
+            + '<input type="file" id="photoFileInput" accept="image/*" style="display:none;">';
+
+        var infoCardHtml = '<div class="section-label"><span class="num mono">I</span><h2>정보</h2><span class="line"></span></div>'
+            + '<div style="display:flex;gap:8px;margin-bottom:16px;">'
+            + '<a class="btn-secondary" style="margin-top:0;text-align:center;text-decoration:none;flex:1;" target="_blank" rel="noopener" href="https://www.google.com/search?q=' + encodeURIComponent(b.title + ' ' + (b.author || '')) + '">🔍 구글에서 보기</a>'
+            + '<a class="btn-secondary" style="margin-top:0;text-align:center;text-decoration:none;flex:1;" target="_blank" rel="noopener" href="https://www.aladin.co.kr/search/wsearchresult.aspx?SearchTarget=Book&SearchWord=' + encodeURIComponent(b.title) + '">📗 알라딘에서 보기</a>'
+            + '</div>'
+            + '<div class="info-grid">'
+            + '<div class="info-box"><div class="ib-label">시작일</div><div class="ib-value">' + (b.startDate ? fmtDateFull(b.startDate) : '—') + startDateEditBtnHtml + '</div></div>'
+            + '<div class="info-box"><div class="ib-label">이 책의 교환일</div><div class="ib-value">' + (b.nextExchangeDate ? fmtDateFull(b.nextExchangeDate) : '미정') + '</div></div>'
+            + (b.publisher ? '<div class="info-box"><div class="ib-label">출판사</div><div class="ib-value">' + escapeHtml(b.publisher) + '</div></div>' : '')
+            + (b.isbn13 ? '<div class="info-box"><div class="ib-label">ISBN</div><div class="ib-value mono" style="font-size:11px;">' + escapeHtml(b.isbn13) + '</div></div>' : '')
+            + '</div>'
+            + (b.status !== 'finished'
+                ? '<div class="field">'
+                    + '<label>이 책의 교환일</label>'
+                    + '<div class="assign-select-row">'
+                    + '<div class="info-box" style="flex:1;"><div class="ib-value">' + (b.nextExchangeDate ? fmtDateFull(b.nextExchangeDate) : '아직 안 정함') + '</div></div>'
+                    + '<button class="heart-btn" id="openExchangeVoteBtn">제안·참석</button>'
+                    + '</div>'
+                    + pickExchangeDateBtnHtml
+                    + '</div>'
+                : '');
+
+        return headerHtml
+            + '\n\n    ' + nudgeBannerHtml
+            + '\n\n    ' + mainActionHtml
+            + '\n\n    ' + queueSectionHtml
+            + '\n\n    ' + (b.status === 'reading' ? progressDetailHtml(b) : '')
+            + '\n\n    ' + historyHtml
+            + '\n\n    ' + commentsHtml
+            + '\n\n    ' + photosHtml
+            + '\n\n    ' + infoCardHtml;
     }
     // ---------- MODALS ----------
     function openModal(html) {
@@ -1608,7 +2100,10 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var m = getLoggedInMember();
         if (m) {
             box.innerHTML = '<div class="login-pill" id="loginPill"><div class="avatar-circle" style="' + avatarStyle(m.color) + '">' + avatarContent(m) + '</div><span>' + escapeHtml(m.name) + '</span></div>';
-            document.getElementById('loginPill').onclick = function () { return openAccountSwitchModal(); };
+            document.getElementById('loginPill').onclick = function () {
+                currentView = 'myPage';
+                render();
+            };
         } else {
             box.innerHTML = '';
         }
@@ -1623,10 +2118,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                     + '<div class="author">' + escapeHtml(g.display_name) + (g.group_id === current ? ' · 지금 보는 중' : '') + '</div></div></div></button>';
             }).join('') + '</div>'
             : '';
-        openModal('<h3>계정</h3>'
+        openModal('<h3>그룹 전환</h3>'
             + '<p style="font-size:13px;color:var(--ink-soft);margin-bottom:16px;">지금 <strong>' + escapeHtml((getLoggedInMember() || {}).name || '') + '</strong>(으)로 로그인돼 있어요.</p>'
             + switchHtml
-            + '<button class="btn-secondary" id="showInviteCodeBtn">이 그룹 초대 코드 보기</button>'
             + '<button class="btn-secondary" id="joinAnotherGroupBtn">다른 그룹 참가하기</button>'
             + '<button class="btn-text" id="logoutBtn" style="width:100%;margin-top:10px;color:var(--stamp);">로그아웃</button>');
         document.querySelectorAll('[data-switch-group]').forEach(function (btn) {
@@ -1635,10 +2129,6 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 if (window.__switchGroup__) window.__switchGroup__(btn.dataset.switchGroup);
             };
         });
-        document.getElementById('showInviteCodeBtn').onclick = function () {
-            closeModal();
-            if (window.__showInviteCode__) window.__showInviteCode__();
-        };
         document.getElementById('joinAnotherGroupBtn').onclick = function () {
             closeModal();
             if (window.__promptJoinGroup__) window.__promptJoinGroup__();
@@ -1729,27 +2219,67 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     var selectedKakaoBook = null;
     var kakaoSearchDebounce = null;
-    function openAddBookModal() {
+    /**
+     * 홈 화면 "+"과 서고 "책 추가"가 쓰는 공용 책 추가 모달.
+     * opts.ownerId: 있으면 그 프로필로 바로 등록(서고 쪽 — 항상 로그인한 본인), 없으면 requireLogin으로 물어봄(홈 FAB).
+     * opts.title: 모달 제목. opts.withPageCount/opts.withExchangeProposal: 홈 FAB 전용 필드 노출 여부(기본 true).
+     */
+    function openAddBookModal(opts) {
+        opts = opts || {};
+        var withPageCount = opts.withPageCount !== false;
+        var withExchangeProposal = opts.withExchangeProposal !== false;
         var _this = this;
         selectedKakaoBook = null;
-        openModal("\n    <h3>\uCC45 \uCD94\uAC00</h3>\n    <div class=\"field\">\n      <label>\uCC45 \uC81C\uBAA9\uC73C\uB85C \uAC80\uC0C9</label>\n      <input type=\"text\" id=\"newBookTitle\" placeholder=\"\uC608: \uC544\uBAAC\uB4DC\" maxlength=\"60\" autocomplete=\"off\">\n      <div id=\"kakaoResults\" style=\"margin-top:8px;\"></div>\n    </div>\n\n    <div id=\"manualEntryToggle\" style=\"margin-bottom:14px;\">\n      <button class=\"btn-text\" id=\"manualEntryBtn\" style=\"text-decoration:underline;padding:0;\">\uAC80\uC0C9 \uACB0\uACFC \uC5C6\uC774 \uC9C1\uC811 \uC785\uB825\uD560\uB798\uC694</button>\n    </div>\n\n    <div id=\"selectedBookPreview\"></div>\n\n    <div class=\"field\" id=\"manualFields\" style=\"display:none;\">\n      <label>\uC800\uC790 (\uC120\uD0DD)</label>\n      <input type=\"text\" id=\"newBookAuthor\" placeholder=\"\uC608: \uC190\uC6D0\uD3C9\" maxlength=\"40\">\n    </div>\n\n    <div class=\"field\">\n      <label>\uC0C1\uD0DC</label>\n      <div class=\"entry-type-choice\">\n        <button type=\"button\" class=\"entry-type-btn status-choice-btn active\" data-status=\"unread\">\n          <span class=\"icon\">\uD83D\uDCDA</span><span>\uC548 \uC77D\uC74C</span>\n        </button>\n        <button type=\"button\" class=\"entry-type-btn status-choice-btn\" data-status=\"reading\">\n          <span class=\"icon\">\uD83D\uDCD6</span><span>\uC77D\uB294 \uC911</span>\n        </button>\n        <button type=\"button\" class=\"entry-type-btn status-choice-btn\" data-status=\"finished\">\n          <span class=\"icon\">\u2705</span><span>\uC644\uB3C5</span>\n        </button>\n      </div>\n    </div>\n    <div class=\"field\">\n      <label>\uCABD\uC218 (\uC120\uD0DD)</label>\n      <input type=\"number\" id=\"newBookPageCount\" min=\"0\" placeholder=\"\uC608: 320\">\n    </div>\n    <div class=\"field\" id=\"newBookExternalBorrowField\" style=\"display:none;\">\n      <label style=\"display:flex;align-items:center;gap:8px;cursor:pointer;\"><input type=\"checkbox\" id=\"newBookExternalBorrow\" style=\"width:18px;height:18px;\"><span>도서관·모임 밖에서 빌려 읽었어요 (제 소장 도서 아님)</span></label>\n      <p style=\"font-size:11px;color:var(--pencil);margin-top:4px;\">체크하면 완독 기록에는 남지만 '소장도서'로 등록되지 않고, 다른 멤버가 빌려달라고 신청할 수 없어요.</p>\n    </div>\n    <div class=\"field\" id=\"newBookExchangeDateField\" style=\"display:none;\">\n      <label>\uBAA9\uD45C \uAD50\uD658\uC77C \uC81C\uC548 (\uC120\uD0DD)</label>\n      <input type=\"date\" id=\"newBookExchangeDate\">\n      <p style=\"font-size:11px;color:var(--pencil);margin-top:4px;\">새 날짜를 넣으면 로그인한 내 이름으로 교환일 제안이 올라가요.</p>\n      <div id=\"joinExistingProposalOnAddBox\" style=\"margin-top:12px;\"></div>\n    </div>\n    <button class=\"btn-primary\" id=\"saveBookBtn\">\uCD94\uAC00\uD558\uAE30</button>\n  ");
-        var joinProposalBox = document.getElementById('joinExistingProposalOnAddBox');
-        if (joinProposalBox) {
-            joinProposalBox.innerHTML = (state.exchangeProposals || []).length
-                ? '<label style="margin-bottom:8px;">현재 모집 중인 교환일에 참여</label>' + (state.exchangeProposals || []).map(function (p) {
-                    return '<label class="due-card" style="display:block;cursor:pointer;box-shadow:none;padding:10px 12px;margin-bottom:8px;"><input type="radio" name="joinProposalOnAdd" value="' + escapeHtml(p.id) + '" style="width:16px;height:16px;margin-right:8px;">' + fmtDateFull(p.date) + ' · 👥 ' + ((p.votes || []).length) + '명 참석 예정</label>';
-                }).join('')
-                : '<p style="font-size:11px;color:var(--pencil);">현재 모집 중인 교환일이 없어요.</p>';
+        openModal('<h3>' + escapeHtml(opts.title || '책 추가') + '</h3>'
+            + '<div class="field"><label>책 제목으로 검색</label>'
+            + '<input type="text" id="newBookTitle" placeholder="예: 강아지똥" maxlength="60" autocomplete="off">'
+            + '<div id="kakaoResults" style="margin-top:8px;"></div></div>'
+            + '<div id="manualEntryToggle" style="margin-bottom:14px;">'
+            + '<button class="btn-text" id="manualEntryBtn" style="text-decoration:underline;padding:0;">검색 결과 없이 직접 입력할래요</button></div>'
+            + '<div id="selectedBookPreview"></div>'
+            + '<div class="field" id="manualFields" style="display:none;"><label>저자 (선택)</label>'
+            + '<input type="text" id="newBookAuthor" placeholder="예: 권정생" maxlength="40"></div>'
+            + '<div class="field"><label>상태</label><div class="entry-type-choice">'
+            + '<button type="button" class="entry-type-btn status-choice-btn active" data-status="shelved"><span class="icon">📚</span><span>안 읽음</span></button>'
+            + '<button type="button" class="entry-type-btn status-choice-btn" data-status="reading"><span class="icon">📖</span><span>읽는 중</span></button>'
+            + '<button type="button" class="entry-type-btn status-choice-btn" data-status="finished"><span class="icon">✅</span><span>완독</span></button>'
+            + '</div></div>'
+            + (withPageCount ? '<div class="field"><label>쪽수 (선택)</label><input type="number" id="newBookPageCount" min="0" placeholder="예: 320"></div>' : '')
+            + '<div class="field" id="newBookStartDateField" style="display:none;"><label>읽기 시작일</label>'
+            + '<input type="date" id="newBookStartDate" value="' + todayIso() + '"></div>'
+            + '<div class="field" id="newBookEndDateField" style="display:none;"><label>완독일</label>'
+            + '<input type="date" id="newBookEndDate" value="' + todayIso() + '"></div>'
+            + '<div class="field" id="newBookExternalBorrowField" style="display:none;">'
+            + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="newBookExternalBorrow" style="width:18px;height:18px;"><span>도서관·모임 밖에서 빌려 읽었어요 (제 소장 도서 아님)</span></label>'
+            + '<p style="font-size:11px;color:var(--pencil);margin-top:4px;">체크하면 완독 기록에는 남지만 \'소장도서\'로 등록되지 않고, 다른 멤버가 빌려달라고 신청할 수 없어요.</p></div>'
+            + (withExchangeProposal
+                ? '<div class="field" id="newBookExchangeDateField" style="display:none;"><label>목표 교환일 제안 (선택)</label>'
+                    + '<input type="date" id="newBookExchangeDate">'
+                    + '<p style="font-size:11px;color:var(--pencil);margin-top:4px;">새 날짜를 넣으면 로그인한 내 이름으로 교환일 제안이 올라가요.</p>'
+                    + '<div id="joinExistingProposalOnAddBox" style="margin-top:12px;"></div></div>'
+                : '')
+            + '<button class="btn-primary" id="saveBookBtn">추가하기</button>');
+        if (withExchangeProposal) {
+            var joinProposalBox = document.getElementById('joinExistingProposalOnAddBox');
+            if (joinProposalBox) {
+                joinProposalBox.innerHTML = (state.exchangeProposals || []).length
+                    ? '<label style="margin-bottom:8px;">현재 모집 중인 교환일에 참여</label>' + (state.exchangeProposals || []).map(function (p) {
+                        return '<label class="due-card" style="display:block;cursor:pointer;box-shadow:none;padding:10px 12px;margin-bottom:8px;"><input type="radio" name="joinProposalOnAdd" value="' + escapeHtml(p.id) + '" style="width:16px;height:16px;margin-right:8px;">' + fmtDateFull(p.date) + ' · 👥 ' + ((p.votes || []).length) + '명 참석 예정</label>';
+                    }).join('')
+                    : '<p style="font-size:11px;color:var(--pencil);">현재 모집 중인 교환일이 없어요.</p>';
+            }
         }
-        var selectedStatus = 'unread';
+        var selectedStatus = 'shelved';
         var statusBtns = document.querySelectorAll('.status-choice-btn');
         statusBtns.forEach(function (btn) {
             btn.onclick = function () {
                 statusBtns.forEach(function (b) { return b.classList.remove('active'); });
                 btn.classList.add('active');
                 selectedStatus = btn.dataset.status;
-                document.getElementById('newBookExchangeDateField').style.display = selectedStatus === 'reading' ? 'block' : 'none';
+                if (withExchangeProposal) document.getElementById('newBookExchangeDateField').style.display = selectedStatus === 'reading' ? 'block' : 'none';
                 document.getElementById('newBookExternalBorrowField').style.display = selectedStatus === 'finished' ? 'block' : 'none';
+                document.getElementById('newBookStartDateField').style.display = (selectedStatus === 'reading' || selectedStatus === 'finished') ? 'block' : 'none';
+                document.getElementById('newBookEndDateField').style.display = selectedStatus === 'finished' ? 'block' : 'none';
             };
         });
         var titleInput = document.getElementById('newBookTitle');
@@ -1772,8 +2302,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             selectedKakaoBook = null;
         };
         var doSaveBook = async function (e, ownerId) {
-            var proposedDate = document.getElementById('newBookExchangeDate').value || null;
-            var selectedExistingProposalEl = document.querySelector('input[name="joinProposalOnAdd"]:checked');
+            var proposedDate = withExchangeProposal ? (document.getElementById('newBookExchangeDate').value || null) : null;
+            var selectedExistingProposalEl = withExchangeProposal ? document.querySelector('input[name="joinProposalOnAdd"]:checked') : null;
             var selectedExistingProposalId = selectedExistingProposalEl ? selectedExistingProposalEl.value : '';
             var title, author, coverUrl = '', publisher = '', isbn13 = '';
             var authorInput;
@@ -1797,16 +2327,20 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             var pageCount = pageCountInput && pageCountInput.value ? parseInt(pageCountInput.value, 10) || 0 : 0;
             var externalBorrowInput = document.getElementById('newBookExternalBorrow');
             var externalBorrow = selectedStatus === 'finished' && !!(externalBorrowInput && externalBorrowInput.checked);
+            var startDateInput = document.getElementById('newBookStartDate');
+            var endDateInput = document.getElementById('newBookEndDate');
+            var bookStartDate = (startDateInput && startDateInput.value) || todayIso();
+            var bookEndDate = (endDateInput && endDateInput.value) || todayIso();
             setBtnLoading(e.target, '추가하는 중...');
             try {
-                applyState(await callServer('addBook', { title: title, author: author, ownerId: ownerId, status: selectedStatus, startDate: todayIso(), coverUrl: coverUrl, publisher: publisher, isbn13: isbn13, pageCount: pageCount, currentPage: selectedStatus === 'finished' ? pageCount : 0, externalBorrow: externalBorrow }));
-                if (selectedStatus === 'reading' && selectedExistingProposalId) {
+                applyState(await callServer('addBook', { title: title, author: author, ownerId: ownerId, status: selectedStatus, startDate: bookStartDate, endDate: bookEndDate, coverUrl: coverUrl, publisher: publisher, isbn13: isbn13, pageCount: pageCount, currentPage: selectedStatus === 'finished' ? pageCount : 0, externalBorrow: externalBorrow }));
+                if (withExchangeProposal && selectedStatus === 'reading' && selectedExistingProposalId) {
                     var newAddedBook = state.books.filter(function (b) { return b.ownerId === ownerId && b.title === title; }).sort(function (a, b) { return String(b.createdAt || '').localeCompare(String(a.createdAt || '')); })[0];
                     if (newAddedBook) {
                         applyState(await callServer('voteExchangeProposal', selectedExistingProposalId, ownerId, true, [newAddedBook.id]));
                     }
                 }
-                if (selectedStatus === 'reading' && proposedDate) {
+                if (withExchangeProposal && selectedStatus === 'reading' && proposedDate) {
                     var proposalBook = state.books.filter(function (b) { return b.ownerId === ownerId && b.title === title; }).sort(function (a, b) { return String(b.createdAt || '').localeCompare(String(a.createdAt || '')); })[0];
                     applyState(await callServer('proposeExchangeDate', ownerId, proposedDate, proposalBook ? [proposalBook.id] : []));
                 }
@@ -1820,7 +2354,11 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             }
         };
         document.getElementById('saveBookBtn').onclick = function (e) {
-            requireLogin(function (myId) { return doSaveBook(e, myId); });
+            if (opts.ownerId) {
+                doSaveBook(e, opts.ownerId);
+            } else {
+                requireLogin(function (myId) { return doSaveBook(e, myId); });
+            }
         };
     }
     function runKakaoSearch(query, resultsBox) {
@@ -1999,127 +2537,6 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 }
             });
         }); });
-    }
-    var selectedLibraryBook = null;
-    var librarySearchDebounce = null;
-    function openAddLibraryBookModal(ownerId) {
-        var _this = this;
-        selectedLibraryBook = null;
-        openModal("\n    <h3>\uC11C\uACE0\uC5D0 \uCC45 \uCD94\uAC00</h3>\n    <div class=\"field\">\n      <label>\uCC45 \uC81C\uBAA9\uC73C\uB85C \uAC80\uC0C9</label>\n      <input type=\"text\" id=\"libraryTitle\" placeholder=\"\uCC45 \uC81C\uBAA9\" maxlength=\"60\" autocomplete=\"off\">\n      <div id=\"libraryKakaoResults\" style=\"margin-top:8px;\"></div>\n    </div>\n\n    <div id=\"libraryManualEntryToggle\" style=\"margin-bottom:14px;\">\n      <button class=\"btn-text\" id=\"libraryManualEntryBtn\" style=\"text-decoration:underline;padding:0;\">\uAC80\uC0C9 \uACB0\uACFC \uC5C6\uC774 \uC9C1\uC811 \uC785\uB825\uD560\uB798\uC694</button>\n    </div>\n\n    <div id=\"selectedLibraryBookPreview\"></div>\n\n    <div class=\"field\" id=\"libraryManualFields\" style=\"display:none;\">\n      <label>\uC800\uC790 (\uC120\uD0DD)</label>\n      <input type=\"text\" id=\"libraryAuthor\" placeholder=\"\uC800\uC790\" maxlength=\"40\">\n    </div>\n    <div class=\"field\">\n      <label>\uC0C1\uD0DC</label>\n      <select id=\"libraryStatus\">\n        <option value=\"unread\">\uC548 \uC77D\uC74C</option>\n        <option value=\"reading\">\uC77D\uB294 \uC911</option>\n        <option value=\"finished\">\uC644\uB3C5</option>\n      </select>\n    </div>\n    <div class=\"field\" id=\"libraryExternalBorrowField\" style=\"display:none;\">\n      <label style=\"display:flex;align-items:center;gap:8px;cursor:pointer;\"><input type=\"checkbox\" id=\"libraryExternalBorrow\" style=\"width:18px;height:18px;\"><span>도서관·모임 밖에서 빌려 읽었어요 (제 소장 도서 아님)</span></label>\n    </div>\n    <button class=\"btn-primary\" id=\"saveLibraryBookBtn\">\uCD94\uAC00\uD558\uAE30</button>\n  ");
-        var titleInput = document.getElementById('libraryTitle');
-        var resultsBox = document.getElementById('libraryKakaoResults');
-        titleInput.oninput = function () {
-            selectedLibraryBook = null;
-            document.getElementById('selectedLibraryBookPreview').innerHTML = '';
-            var q = titleInput.value.trim();
-            clearTimeout(librarySearchDebounce);
-            if (q.length < 2) {
-                resultsBox.innerHTML = '';
-                return;
-            }
-            librarySearchDebounce = setTimeout(function () { return runLibraryBookSearch(q, resultsBox); }, 450);
-        };
-        document.getElementById('libraryManualEntryBtn').onclick = function () {
-            document.getElementById('libraryManualFields').style.display = 'block';
-            document.getElementById('libraryManualEntryToggle').style.display = 'none';
-            resultsBox.innerHTML = '';
-            selectedLibraryBook = null;
-        };
-        document.getElementById('libraryStatus').onchange = function () {
-            document.getElementById('libraryExternalBorrowField').style.display = this.value === 'finished' ? 'block' : 'none';
-        };
-        document.getElementById('saveLibraryBookBtn').onclick = function (e) { return __awaiter(_this, void 0, void 0, function () {
-            var status, title, author, coverUrl, publisher, isbn13, externalBorrow, err_18;
-            var _a;
-            return __generator(this, function (_b) {
-                switch (_b.label) {
-                    case 0:
-                        status = document.getElementById('libraryStatus').value;
-                        externalBorrow = status === 'finished' && !!document.getElementById('libraryExternalBorrow').checked;
-                        coverUrl = '', publisher = '', isbn13 = '';
-                        if (selectedLibraryBook) {
-                            title = selectedLibraryBook.title;
-                            author = selectedLibraryBook.author;
-                            coverUrl = selectedLibraryBook.cover;
-                            publisher = selectedLibraryBook.publisher;
-                            isbn13 = selectedLibraryBook.isbn13;
-                        }
-                        else {
-                            title = titleInput.value.trim();
-                            author = ((_a = (document.getElementById('libraryAuthor') || {}).value) === null || _a === void 0 ? void 0 : _a.trim()) || '';
-                        }
-                        if (!title) {
-                            showToast('책 제목을 입력해주세요', true);
-                            return [2 /*return*/];
-                        }
-                        setBtnLoading(e.target, '추가하는 중...');
-                        _b.label = 1;
-                    case 1:
-                        _b.trys.push([1, 4, , 5]);
-                        return [4 /*yield*/, callServer('addBook', { title: title, author: author, coverUrl: coverUrl, publisher: publisher, isbn13: isbn13, ownerId: ownerId, status: status, startDate: todayIso(), externalBorrow: externalBorrow })];
-                    case 2:
-                        applyState(_b.sent());
-                        return [4 /*yield*/, Promise.resolve()];
-                    case 3:
-                        _b.sent();
-                        closeModal();
-                        render();
-                        showToast('서고에 책을 추가했어요');
-                        return [3 /*break*/, 5];
-                    case 4:
-                        err_18 = _b.sent();
-                        showToast(err_18.message || '추가에 실패했어요', true);
-                        resetBtn(e.target);
-                        return [3 /*break*/, 5];
-                    case 5: return [2 /*return*/];
-                }
-            });
-        }); };
-    }
-    function runLibraryBookSearch(query, resultsBox) {
-        return __awaiter(this, void 0, void 0, function () {
-            var raw, results_3, err_19;
-            return __generator(this, function (_a) {
-                switch (_a.label) {
-                    case 0:
-                        resultsBox.innerHTML = "<p style=\"font-size:12px;color:var(--pencil);\">\uAC80\uC0C9 \uC911...</p>";
-                        _a.label = 1;
-                    case 1:
-                        _a.trys.push([1, 3, , 4]);
-                        return [4 /*yield*/, callServer('searchKakaoBooks', query)];
-                    case 2:
-                        raw = _a.sent();
-                        results_3 = raw ? JSON.parse(raw) : [];
-                        if (!results_3 || results_3.length === 0) {
-                            resultsBox.innerHTML = "<p style=\"font-size:12px;color:var(--pencil);\">\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC5B4\uC694. \uC9C1\uC811 \uC785\uB825\uD574\uC8FC\uC138\uC694.</p>";
-                            return [2 /*return*/];
-                        }
-                        resultsBox.innerHTML = "\n      <div style=\"display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;border:1px solid var(--ink);border-radius:8px;padding:6px;background:var(--card-bg);\">\n        ".concat(results_3.map(function (r, i) { return "\n          <button class=\"library-result-item\" data-idx=\"".concat(i, "\" style=\"display:flex;gap:10px;text-align:left;background:transparent;border:none;padding:6px;border-radius:var(--radius-card);cursor:pointer;align-items:center;\">\n            <div style=\"width:34px;height:48px;flex-shrink:0;border-radius:2px;overflow:hidden;background:var(--paper-dark);\">\n              ").concat(r.cover ? "<img src=\"".concat(r.cover, "\" style=\"width:100%;height:100%;object-fit:cover;\">") : '', "\n            </div>\n            <div style=\"min-width:0;\">\n              <div style=\"font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">").concat(escapeHtml(r.title), "</div>\n              <div style=\"font-size:11px;color:var(--pencil);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;\">").concat(escapeHtml(r.author), " ").concat(r.publisher ? '· ' + escapeHtml(r.publisher) : '', "</div>\n            </div>\n          </button>\n        "); }).join(''), "\n      </div>\n    ");
-                        resultsBox.querySelectorAll('.library-result-item').forEach(function (btn) {
-                            btn.onclick = function () {
-                                var r = results_3[parseInt(btn.dataset.idx)];
-                                selectedLibraryBook = r;
-                                document.getElementById('libraryTitle').value = r.title;
-                                resultsBox.innerHTML = '';
-                                document.getElementById('libraryManualFields').style.display = 'none';
-                                document.getElementById('libraryManualEntryToggle').style.display = 'none';
-                                document.getElementById('selectedLibraryBookPreview').innerHTML = "\n          <div style=\"display:flex;gap:12px;align-items:center;background:var(--card-bg);border:1.5px solid var(--ink);border-radius:8px;padding:10px;margin-bottom:14px;\">\n            <div style=\"width:44px;height:62px;flex-shrink:0;border-radius:2px;overflow:hidden;background:var(--paper-dark);\">\n              ".concat(r.cover ? "<img src=\"".concat(r.cover, "\" style=\"width:100%;height:100%;object-fit:cover;\">") : '', "\n            </div>\n            <div style=\"flex:1;min-width:0;\">\n              <div style=\"font-family:'Gowun Batang',serif;font-weight:700;font-size:14px;\">").concat(escapeHtml(r.title), "</div>\n              <div style=\"font-size:12px;color:var(--pencil);\">").concat(escapeHtml(r.author), "</div>\n            </div>\n            <button class=\"btn-text\" id=\"clearSelectedLibraryBook\" style=\"color:var(--stamp);\">\uBCC0\uACBD</button>\n          </div>\n        ");
-                                document.getElementById('clearSelectedLibraryBook').onclick = function () {
-                                    selectedLibraryBook = null;
-                                    document.getElementById('selectedLibraryBookPreview').innerHTML = '';
-                                    document.getElementById('libraryManualEntryToggle').style.display = 'block';
-                                };
-                            };
-                        });
-                        return [3 /*break*/, 4];
-                    case 3:
-                        err_19 = _a.sent();
-                        resultsBox.innerHTML = "<p style=\"font-size:12px;color:var(--stamp);\">".concat(escapeHtml(err_19.message || '검색에 실패했어요'), "</p>");
-                        return [3 /*break*/, 4];
-                    case 4: return [2 /*return*/];
-                }
-            });
-        });
     }
     function openAddWishModal() {
         var _this = this;
@@ -2450,6 +2867,17 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 });
             };
         });
+        document.querySelectorAll('#main .record-heart-btn').forEach(function (btn) {
+            btn.onclick = function (e) {
+                e.stopPropagation();
+                requireLogin(function (myId) {
+                    var wasLiked = btn.dataset.heartLiked === '1';
+                    callServer('toggleRecordItemHeart', btn.dataset.heartEntityType, btn.dataset.heartEntityId, btn.dataset.heartItemId, btn.dataset.heartParentPhotoId || null, myId, !wasLiked)
+                        .then(function (result) { applyState(result); render(); })
+                        .catch(function (err) { showToast(err.message || '실패', true); });
+                });
+            };
+        });
         document.querySelectorAll('[data-goto-book]').forEach(function (btn) {
             btn.onclick = function () {
                 detailBookId = btn.dataset.gotoBook;
@@ -2492,6 +2920,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var emptyAdd2 = document.getElementById('emptyAddMemberBtn2');
         if (emptyAdd2)
             emptyAdd2.onclick = openAddMemberModal;
+        var inviteMemberBtn = document.getElementById('inviteMemberBtn');
+        if (inviteMemberBtn)
+            inviteMemberBtn.onclick = openAddMemberModal;
         var backHome = document.getElementById('backToHome');
         if (backHome)
             backHome.onclick = function () { currentView = 'home'; render(); };
@@ -2507,6 +2938,12 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var editMyProfileBtn = document.getElementById('editMyProfileBtn');
         if (editMyProfileBtn)
             editMyProfileBtn.onclick = function () { return openEditMemberProfileModal(getLoggedInMemberId()); };
+        var openAccountModalBtn = document.getElementById('openAccountModalBtn');
+        if (openAccountModalBtn)
+            openAccountModalBtn.onclick = function () { return openAccountSwitchModal(); };
+        var myPageInviteCodeBtn = document.getElementById('myPageInviteCodeBtn');
+        if (myPageInviteCodeBtn)
+            myPageInviteCodeBtn.onclick = function () { if (window.__showInviteCode__) window.__showInviteCode__(); };
         var addLibraryBookBtn = document.getElementById('addLibraryBookBtn');
         if (addLibraryBookBtn)
             addLibraryBookBtn.onclick = function () {
@@ -2515,7 +2952,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                         showToast('본인 서고에만 책을 추가할 수 있어요', true);
                         return;
                     }
-                    openAddLibraryBookModal(myId);
+                    openAddBookModal({ ownerId: myId, title: '서고에 책 추가', withPageCount: false, withExchangeProposal: false });
                 });
             };
         var addWishFromLibraryBtn = document.getElementById('addWishFromLibraryBtn');
@@ -2539,50 +2976,40 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         });
         document.querySelectorAll('.library-status-select').forEach(function (sel) {
             sel.onclick = function (e) { return e.stopPropagation(); };
-            sel.onchange = function (e) { return __awaiter(_this, void 0, void 0, function () {
-                var bookId, newStatus, b, stateJson, err_24;
-                return __generator(this, function (_a) {
-                    switch (_a.label) {
-                        case 0:
-                            e.stopPropagation();
-                            bookId = sel.dataset.statusBook;
-                            newStatus = sel.value;
-                            b = getBook(bookId);
-                            if (!b)
-                                return [2 /*return*/];
-                            sel.disabled = true;
-                            _a.label = 1;
-                        case 1:
-                            _a.trys.push([1, 9, , 10]);
-                            if (!(newStatus === 'reading')) return [3 /*break*/, 3];
-                            return [4 /*yield*/, callServer('assignReader', bookId, b.ownerId, todayIso(), null)];
-                        case 2:
-                            stateJson = _a.sent();
-                            return [3 /*break*/, 7];
-                        case 3:
-                            if (!(newStatus === 'finished')) return [3 /*break*/, 5];
-                            return [4 /*yield*/, callServer('markFinished', bookId, getLoggedInMemberId())];
-                        case 4:
-                            stateJson = _a.sent();
-                            return [3 /*break*/, 7];
-                        case 5: return [4 /*yield*/, callServer('assignReader', bookId, null, todayIso(), null)];
-                        case 6:
-                            stateJson = _a.sent();
-                            _a.label = 7;
-                        case 7:
-                            applyState(stateJson);
-                            render();
-                            showToast('상태를 업데이트했어요');
-                            return [3 /*break*/, 10];
-                        case 9:
-                            err_24 = _a.sent();
-                            showToast(err_24.message || '실패', true);
-                            sel.disabled = false;
-                            return [3 /*break*/, 10];
-                        case 10: return [2 /*return*/];
-                    }
-                });
-            }); };
+            sel.onchange = function (e) {
+                e.stopPropagation();
+                var bookId = sel.dataset.statusBook;
+                var newStatus = sel.value;
+                var b = getBook(bookId);
+                if (!b) return;
+
+                // 완독은 날짜/후기 모달(openMarkFinishedReviewModal)을 그대로 재사용한다 — 어차피
+                // 그 모달이 markFinished 호출부터 렌더까지 전부 처리해준다.
+                if (newStatus === 'finished') {
+                    openMarkFinishedReviewModal(bookId);
+                    return;
+                }
+
+                function commit(startDate) {
+                    sel.disabled = true;
+                    callServer('assignReader', bookId, newStatus === 'reading' ? b.ownerId : null, startDate, null)
+                        .then(function (stateJson) {
+                        applyState(stateJson);
+                        render();
+                        showToast('상태를 업데이트했어요');
+                    })
+                        .catch(function (err) {
+                        showToast(err.message || '실패', true);
+                        sel.disabled = false;
+                    });
+                }
+
+                if (newStatus === 'reading') {
+                    openStartDateModal(commit);
+                } else {
+                    commit(todayIso());
+                }
+            };
         });
         document.querySelectorAll('[data-delete-library]').forEach(function (btn) {
             btn.onclick = function (e) {
@@ -2615,7 +3042,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var saveNotifyBtn = document.getElementById('saveNotifyBtn');
         if (saveNotifyBtn)
             saveNotifyBtn.onclick = function () { return __awaiter(_this, void 0, void 0, function () {
-                var email, time, days, enabled, err_26;
+                var email, time, days, enabled, onComment, onHeart, onRecommend, err_26;
                 return __generator(this, function (_a) {
                     switch (_a.label) {
                         case 0:
@@ -2623,6 +3050,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                             time = document.getElementById('notifyTime').value;
                             days = getCheckedDays('memberDetail');
                             enabled = document.getElementById('notifyEnabled').checked;
+                            onComment = document.getElementById('notifyOnComment').checked;
+                            onHeart = document.getElementById('notifyOnHeart').checked;
+                            onRecommend = document.getElementById('notifyOnRecommend').checked;
                             if (enabled && !email) {
                                 showToast('알림을 받으려면 이메일을 입력해주세요', true);
                                 return [2 /*return*/];
@@ -2631,7 +3061,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                             _a.label = 1;
                         case 1:
                             _a.trys.push([1, 4, , 5]);
-                            return [4 /*yield*/, callServer('updateMemberNotify', getLoggedInMemberId(), email, time, days, enabled)];
+                            return [4 /*yield*/, callServer('updateMemberNotify', getLoggedInMemberId(), email, time, days, enabled, onComment, onHeart, onRecommend)];
                         case 2:
                             applyState(_a.sent());
                             return [4 /*yield*/, Promise.resolve()];
@@ -2680,6 +3110,23 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                         showToast(wasHearted ? '찜을 취소했어요' : '찜했어요');
                     } catch (err) {
                         showToast(err.message || '실패했어요', true);
+                    }
+                });
+            };
+        var toggleRecommendBtn = document.getElementById('toggleRecommendBtn');
+        if (toggleRecommendBtn)
+            toggleRecommendBtn.onclick = function () {
+                requireLogin(function (myId) {
+                    var b = getBook(detailBookId);
+                    var already = !!(b && (b.recommendations || []).find(function (r) { return r.memberId === myId; }));
+                    if (already) {
+                        callServer('toggleBookRecommend', detailBookId, myId, false).then(function (stateJson) {
+                            applyState(stateJson);
+                            render();
+                            showToast('추천을 취소했어요');
+                        }).catch(function (err) { showToast(err.message || '실패했어요', true); });
+                    } else {
+                        openRecommendCommentModal(detailBookId);
                     }
                 });
             };
@@ -2741,21 +3188,43 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         document.querySelectorAll('[data-cancel-date]').forEach(function (btn) {
             btn.onclick = function () { return openLeaveExchangeDateMemberPicker(btn.dataset.cancelDate); };
         });
+        document.querySelectorAll('[data-switch-group]').forEach(function (btn) {
+            btn.onclick = function () {
+                if (window.__switchGroup__) window.__switchGroup__(btn.dataset.switchGroup);
+            };
+        });
+        var editStartDateBtn = document.getElementById('editStartDateBtn');
+        if (editStartDateBtn) {
+            editStartDateBtn.onclick = function () {
+                var b = getBook(detailBookId);
+                if (b) openEditStartDateModal(detailBookId, b.startDate);
+            };
+        }
+        document.querySelectorAll('[data-edit-last-history]').forEach(function (btn) {
+            btn.onclick = function () {
+                var b = getBook(detailBookId);
+                if (!b) return;
+                var entry = (b.history || [])[(b.history || []).length - 1];
+                openEditLastHistoryModal(detailBookId, entry);
+            };
+        });
         var startReadingBtn = document.getElementById('startReadingBtn');
         if (startReadingBtn) {
             startReadingBtn.onclick = function () {
                 requireLogin(function (myId) {
-                    openPickExchangeDateModal('목표 교환일을 골라주세요', function (exchangeDate) {
-                        setBtnLoading(startReadingBtn, '시작하는 중...');
-                        callServer('assignReader', detailBookId, myId, todayIso(), exchangeDate)
-                            .then(applyState)
-                            .then(function () {
-                            render();
-                            showToast('읽기 시작했어요');
-                        })
-                            .catch(function (err) {
-                            showToast(err.message || '읽기 시작 실패', true);
-                            resetBtn(startReadingBtn);
+                    openStartDateModal(function (startDate) {
+                        openPickExchangeDateModal('목표 교환일을 골라주세요', function (exchangeDate) {
+                            setBtnLoading(startReadingBtn, '시작하는 중...');
+                            callServer('assignReader', detailBookId, myId, startDate, exchangeDate)
+                                .then(applyState)
+                                .then(function () {
+                                render();
+                                showToast('읽기 시작했어요');
+                            })
+                                .catch(function (err) {
+                                showToast(err.message || '읽기 시작 실패', true);
+                                resetBtn(startReadingBtn);
+                            });
                         });
                     });
                 });
@@ -3163,11 +3632,52 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 render();
             };
         });
+        document.querySelectorAll('[data-records-scope]').forEach(function (el) {
+            el.onclick = function () {
+                var scope = el.dataset.recordsScope;
+                if (scope === 'mine') {
+                    requireLogin(function () { recordsScope = 'mine'; render(); });
+                } else {
+                    recordsScope = 'ours';
+                    render();
+                }
+            };
+        });
+        var addRecordBtn = document.getElementById('addRecordBtn');
+        if (addRecordBtn)
+            addRecordBtn.onclick = function () { requireLogin(function () { openRecordBookPickerModal_(); }); };
+        var addExchangeRecordBtn = document.getElementById('addExchangeRecordBtn');
+        if (addExchangeRecordBtn)
+            addExchangeRecordBtn.onclick = function () { requireLogin(function () { openExchangeRecordPickerModal_(); }); };
+        var addReviewBtn = document.getElementById('addReviewBtn');
+        if (addReviewBtn)
+            addReviewBtn.onclick = function () { openReviewBookPickerModal_(); };
         document.querySelectorAll('[data-wish-detail]').forEach(function (el) {
             el.onclick = function (e) {
                 if (e.target.closest('.has-book-btn')) return;
                 if (e.target.closest('[data-delete-wish]')) return;
                 openWishDetailModal(el.dataset.wishDetail);
+            };
+        });
+        var addShelfBookBtn = document.getElementById('addShelfBookBtn');
+        if (addShelfBookBtn)
+            addShelfBookBtn.onclick = function () {
+                requireLogin(function (myId) {
+                    openAddBookModal({ ownerId: myId, title: '서고에 책 추가', withPageCount: false, withExchangeProposal: false });
+                });
+            };
+        document.querySelectorAll('[data-shelf-scope]').forEach(function (el) {
+            el.onclick = function () {
+                var scope = el.dataset.shelfScope;
+                if (scope === 'mine') {
+                    requireLogin(function () { shelfScope = 'mine'; render(); });
+                } else {
+                    shelfScope = 'ours';
+                    // "다음에 읽을 책" 탭은 내 서고 전용이라, 우리 서고로 돌아가면 탭이 사라지니
+                    // 거기 머물러 있던 상태면 기본 탭으로 되돌린다.
+                    if (shelfCategory === 'nextToRead') shelfCategory = 'finished';
+                    render();
+                }
             };
         });
         document.querySelectorAll('[data-shelf-category]').forEach(function (el) {
@@ -3179,10 +3689,13 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var shelfSearchInput = document.getElementById('shelfSearchInput');
         if (shelfSearchInput) {
             shelfSearchInput.oninput = function () {
-                var reading = state.books.filter(function (b) { return b.status === 'reading'; });
-                var finished = state.books.filter(function (b) { return b.status === 'finished'; });
-                var unread = state.books.filter(function (b) { return b.status === 'shelved'; });
-                var list = shelfCategoryList_(shelfCategory, reading, finished, unread);
+                var scopeMine = shelfScope === 'mine';
+                var myId = getLoggedInMemberId();
+                var reading = state.books.filter(function (b) { return b.status === 'reading' && (!scopeMine || b.ownerId === myId); });
+                var finished = state.books.filter(function (b) { return b.status === 'finished' && (!scopeMine || b.ownerId === myId); });
+                var unread = state.books.filter(function (b) { return b.status === 'shelved' && (!scopeMine || b.ownerId === myId); });
+                var nextToRead = state.books.filter(function (b) { return b.status === 'shelved' && b.wantToRead && b.ownerId === myId; });
+                var list = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead);
                 var filtered = shelfSearchFilter_(list, shelfSearchInput.value);
                 var emptyText = shelfSearchInput.value.trim() ? '검색 결과가 없어요.' : SHELF_EMPTY_TEXT_[shelfCategory];
                 document.getElementById('shelfCardsBox').innerHTML = shelfCardsHtml_(shelfCategory, filtered, emptyText);
@@ -3251,6 +3764,87 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 return;
             }
             openAddBookModal();
+        };
+    }
+    /**
+     * 읽기 시작일을 고르는 모달 — 오늘이 아니라 예전부터 읽고 있었을 수도 있어서
+     * 기본값은 오늘이지만 자유롭게 바꿀 수 있게 한다.
+     */
+    function openStartDateModal(onNext) {
+        openModal('<h3>읽기 시작</h3>'
+            + '<div class="field"><label>읽기 시작일</label><input type="date" id="startDateInput" value="' + todayIso() + '"></div>'
+            + '<button class="btn-primary" id="submitStartDateBtn">다음</button>');
+        document.getElementById('submitStartDateBtn').onclick = function () {
+            var val = document.getElementById('startDateInput').value || todayIso();
+            closeModal();
+            onNext(val);
+        };
+    }
+    /**
+     * 이미 "읽는 중"으로 등록된 책의 시작일을 고치는 모달.
+     */
+    function openEditStartDateModal(bookId, currentStartDate) {
+        openModal('<h3>시작일 수정</h3>'
+            + '<div class="field"><label>읽기 시작일</label><input type="date" id="editStartDateInput" value="' + (currentStartDate || todayIso()) + '"></div>'
+            + '<button class="btn-primary" id="submitEditStartDateBtn">저장</button>');
+        document.getElementById('submitEditStartDateBtn').onclick = async function (e) {
+            var val = document.getElementById('editStartDateInput').value;
+            if (!val) { showToast('날짜를 선택해주세요', true); return; }
+            setBtnLoading(e.target, '저장하는 중...');
+            try {
+                applyState(await callServer('updateReadingStartDate', bookId, getLoggedInMemberId(), val));
+                closeModal();
+                render();
+                showToast('시작일을 수정했어요');
+            } catch (err) {
+                showToast(err.message || '실패했어요', true);
+                resetBtn(e.target);
+            }
+        };
+    }
+    /**
+     * 이미 "완독"으로 등록된 책의 가장 최근 기록(시작일·완독일)을 고치는 모달.
+     */
+    function openEditLastHistoryModal(bookId, entry) {
+        openModal('<h3>날짜 수정</h3>'
+            + '<div class="field"><label>읽기 시작일</label><input type="date" id="editHistoryStartInput" value="' + ((entry && entry.startDate) || todayIso()) + '"></div>'
+            + '<div class="field"><label>완독일</label><input type="date" id="editHistoryEndInput" value="' + ((entry && entry.endDate) || todayIso()) + '"></div>'
+            + '<button class="btn-primary" id="submitEditHistoryBtn">저장</button>');
+        document.getElementById('submitEditHistoryBtn').onclick = async function (e) {
+            var startVal = document.getElementById('editHistoryStartInput').value;
+            var endVal = document.getElementById('editHistoryEndInput').value;
+            if (!startVal || !endVal) { showToast('날짜를 선택해주세요', true); return; }
+            setBtnLoading(e.target, '저장하는 중...');
+            try {
+                applyState(await callServer('updateLastHistoryDates', bookId, getLoggedInMemberId(), startVal, endVal));
+                closeModal();
+                render();
+                showToast('날짜를 수정했어요');
+            } catch (err) {
+                showToast(err.message || '실패했어요', true);
+                resetBtn(e.target);
+            }
+        };
+    }
+    /**
+     * "이 책 추천해요"를 켤 때, 왜 추천하는지 짧은 코멘트를 남기는 모달 (선택 사항).
+     */
+    function openRecommendCommentModal(bookId) {
+        openModal('<h3>이 책 추천해요</h3>'
+            + '<div class="field"><label>왜 추천하나요? (선택)</label><textarea id="recommendCommentInput" placeholder="한마디로 이 책을 소개해주세요" maxlength="200"></textarea></div>'
+            + '<button class="btn-primary" id="submitRecommendBtn">추천하기</button>');
+        document.getElementById('submitRecommendBtn').onclick = async function (e) {
+            var comment = document.getElementById('recommendCommentInput').value.trim();
+            setBtnLoading(e.target, '등록하는 중...');
+            try {
+                applyState(await callServer('toggleBookRecommend', bookId, getLoggedInMemberId(), true, comment));
+                closeModal();
+                render();
+                showToast('추천했어요 ⭐');
+            } catch (err) {
+                showToast(err.message || '실패했어요', true);
+                resetBtn(e.target);
+            }
         };
     }
     /**
@@ -3335,7 +3929,11 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 dateMembers[d.date] = (dateMembers[d.date] || []).concat(d.memberIds || []);
             });
             (state.exchangeProposals || []).forEach(function (p) {
-                dateMembers[p.date] = (dateMembers[p.date] || []).concat(p.votes || []);
+                // 참석자가 0명이 된 제안(다들 불참으로 빠짐)은 교환일 달력에서도 안 보이니,
+                // 여기서도 똑같이 빼야 한다 — 안 그러면 아무도 안 오는 날짜가 "모집 중"으로 남는다.
+                if ((p.votes || []).length > 0) {
+                    dateMembers[p.date] = (dateMembers[p.date] || []).concat(p.votes);
+                }
             });
             var recruitingDates = Object.keys(dateMembers).sort();
 
@@ -3632,13 +4230,15 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
      */
     function openMarkFinishedReviewModal(bookId) {
         openModal('<h3>완독하셨네요!</h3>'
+            + '<div class="field"><label>완독일</label><input type="date" id="finishDateInput" value="' + todayIso() + '"></div>'
             + '<div class="field"><label>완독 후기 (선택)</label><textarea id="finishReviewInput" placeholder="어떤 책이었나요?" maxlength="500"></textarea></div>'
             + '<button class="btn-primary" id="submitFinishBtn">완독 처리</button>');
         document.getElementById('submitFinishBtn').onclick = async function (e) {
             var review = document.getElementById('finishReviewInput').value.trim();
+            var endDate = document.getElementById('finishDateInput').value || todayIso();
             setBtnLoading(e.target, '처리 중...');
             try {
-                applyState(await callServer('markFinished', bookId, getLoggedInMemberId(), review));
+                applyState(await callServer('markFinished', bookId, getLoggedInMemberId(), review, endDate));
                 closeModal();
                 currentView = 'shelf';
                 render();
@@ -3676,6 +4276,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     function openLightbox(p, entityType, entityId) {
         var lb = document.createElement('div');
         lb.className = 'photo-lightbox';
+        var lbBook = entityType === 'book' ? getBook(entityId) : null;
+        var titleHtml = lbBook ? '<div class="lb-title">' + escapeHtml(lbBook.title) + '</div>' : '';
         var comments = p.comments || [];
         var commentsHtml = comments.length
             ? comments.map(function (c) {
@@ -3683,14 +4285,28 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 return '<div class="entry-item text-only" style="margin-bottom:6px;">'
                     + '<div class="entry-body"><div class="entry-caption">' + escapeHtml(c.text) + '</div>'
                     + '<div class="entry-meta">' + (author ? '<span class="entry-author"><span class="entry-avatar-dot" style="' + avatarStyle(author.color) + '"></span>' + escapeHtml(author.name) + '</span>' : '')
-                    + '<span class="entry-date">' + fmtDateFull((c.createdAt || '').slice(0, 10)) + '</span></div></div></div>';
+                    + '<span class="entry-date">' + fmtDateFull((c.createdAt || '').slice(0, 10)) + '</span>'
+                    + recordHeartBtnHtml_(entityType, entityId, c.id, p.id, c.hearts)
+                    + '</div></div></div>';
             }).join('')
             : '<p style="font-size:12px;color:var(--pencil);">아직 댓글이 없어요.</p>';
-        lb.innerHTML = "\n    <button class=\"lb-close\">✕</button>\n    <img src=\"" + photoDisplayUrl(p) + "\">\n    " + (p.caption ? "<div class=\"lb-caption\">" + escapeHtml(p.caption) + "</div>" : '') + "\n    <button class=\"lb-delete\">사진 삭제</button>\n    <div class=\"lb-comments\" style=\"background:var(--card-bg);border-radius:8px;padding:10px 12px;margin-top:10px;max-height:160px;overflow-y:auto;\">\n      " + commentsHtml + "\n    </div>\n    <div class=\"assign-select-row\" style=\"margin-top:8px;\">\n      <input type=\"text\" id=\"lbCommentInput\" class=\"input-plain\" placeholder=\"댓글 남기기\" maxlength=\"300\" style=\"flex:1;\">\n      <button class=\"heart-btn\" id=\"lbCommentBtn\" style=\"flex-shrink:0;\">남기기</button>\n    </div>\n  ";
+        var photoHeartHtml = recordHeartBtnHtml_(entityType, entityId, p.id, null, p.hearts);
+        lb.innerHTML = "\n    <button class=\"lb-close\">✕</button>\n    <img src=\"" + photoDisplayUrl(p) + "\">\n    " + titleHtml + (p.caption ? "<div class=\"lb-caption\">" + escapeHtml(p.caption) + "</div>" : '') + "\n    <div class=\"lb-heart-row\">" + photoHeartHtml + "</div>\n    <button class=\"lb-delete\">사진 삭제</button>\n    <div class=\"lb-comments\" style=\"background:var(--card-bg);border-radius:8px;padding:10px 12px;margin-top:10px;max-height:160px;overflow-y:auto;\">\n      " + commentsHtml + "\n    </div>\n    <div class=\"assign-select-row\" style=\"margin-top:8px;\">\n      <input type=\"text\" id=\"lbCommentInput\" class=\"input-plain\" placeholder=\"댓글 남기기\" maxlength=\"300\" style=\"flex:1;\">\n      <button class=\"heart-btn\" id=\"lbCommentBtn\" style=\"flex-shrink:0;\">남기기</button>\n    </div>\n  ";
         document.body.appendChild(lb);
         lb.querySelector('.lb-close').onclick = function () { return lb.remove(); };
         lb.onclick = function (e) { if (e.target === lb)
             lb.remove(); };
+        var lbTitleEl = lb.querySelector('.lb-title');
+        if (lbTitleEl) {
+            lbTitleEl.onclick = function (e) {
+                e.stopPropagation();
+                lb.remove();
+                detailBookId = entityId;
+                currentView = 'bookDetail';
+                render();
+                window.scrollTo(0, 0);
+            };
+        }
         lb.querySelector('.lb-delete').onclick = async function () {
             try {
                 var deleteFn = entityType === 'exchange' ? 'deleteExchangePhoto' : 'deletePhoto';
@@ -3718,6 +4334,23 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 showToast(err.message || '실패', true);
             }
         };
+        lb.querySelectorAll('.record-heart-btn').forEach(function (btn) {
+            btn.onclick = async function (e) {
+                e.stopPropagation();
+                var myId = getLoggedInMemberId();
+                if (!myId) { showToast('로그인이 필요해요', true); return; }
+                var wasLiked = btn.dataset.heartLiked === '1';
+                try {
+                    applyState(await callServer('toggleRecordItemHeart', entityType, entityId, btn.dataset.heartItemId, btn.dataset.heartParentPhotoId || null, myId, !wasLiked));
+                    render();
+                    lb.remove();
+                    var freshP = findRecordPhoto_(entityType, entityId, p.id);
+                    if (freshP) openLightbox(freshP, entityType, entityId);
+                } catch (err) {
+                    showToast(err.message || '실패', true);
+                }
+            };
+        });
     }
     // ---------- TAB NAV ----------
     document.querySelectorAll('.tab-btn').forEach(function (btn) {
@@ -3789,11 +4422,16 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         if (document.visibilityState === 'visible') refreshOnResume();
     });
     window.addEventListener('pageshow', function () { refreshOnResume(); });
-    var brandEl = document.querySelector('.brand');
-    if (brandEl) {
-        brandEl.style.cursor = 'pointer';
-        brandEl.title = '탭해서 새로고침';
-        brandEl.onclick = function () {
+    var groupNameBtn = document.getElementById('currentGroupName');
+    if (groupNameBtn) {
+        groupNameBtn.onclick = function () {
+            currentView = 'home';
+            render();
+        };
+    }
+    var refreshAppBtn = document.getElementById('refreshAppBtn');
+    if (refreshAppBtn) {
+        refreshAppBtn.onclick = function () {
             showToast('새로고침 중...');
             refreshOnResume();
         };

@@ -1,6 +1,6 @@
 // ============ Supabase 연결 + 인증/그룹 부트스트랩 ============
 // client.js(예전 Client.html 로직을 거의 그대로 옮긴 파일)는 이 파일이 만들어주는
-// window.callServer / window.__CURRENT_MEMBERSHIP_ID__ / window.__mountApp__ 등에 의존한다.
+// window.callServer / window.__CURRENT_PROFILE_ID__ / window.__mountApp__ 등에 의존한다.
 // 역할 분담: 이 파일 = 로그인·그룹 선택(신규), client.js = 서고/책 렌더링(기존 그대로).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -125,7 +125,7 @@ function renderGroupGateScreen() {
         '<h3 style="margin-bottom:6px;">그룹이 아직 없어요</h3>' +
         '<p style="font-size:12.5px;color:var(--pencil);margin-bottom:16px;">새 독서모임을 만들거나, 초대 코드로 기존 그룹에 참가하세요.</p>' +
         '<label>화면에 보일 내 이름</label>' +
-        '<input type="text" id="gateDisplayName" placeholder="예: 손원평" maxlength="12" style="margin-bottom:14px;">' +
+        '<input type="text" id="gateDisplayName" placeholder="예: 박구름" maxlength="12" style="margin-bottom:14px;">' +
         '<label>새 그룹 이름</label>' +
         '<input type="text" id="gateGroupName" placeholder="예: 구름멍멍교환독서클럽" maxlength="30">' +
         '<button class="btn-primary" id="createGroupBtn" style="margin-top:8px;">그룹 만들기</button>' +
@@ -179,7 +179,7 @@ async function handleStaleSessionError_(err) {
     if (!isForeignKeyError) return false;
     await supabase.auth.signOut();
     window.__CURRENT_GROUP_ID__ = null;
-    window.__CURRENT_MEMBERSHIP_ID__ = null;
+    window.__CURRENT_PROFILE_ID__ = null;
     renderSignInScreen();
     toast('로그인 세션이 오래돼서 다시 로그인해주세요.', true);
     return true;
@@ -195,12 +195,11 @@ async function selectGroup(groupId, memberships) {
     window.__CURRENT_GROUP_ID__ = groupId;
     var groupNameEl = document.getElementById('currentGroupName');
     if (groupNameEl) groupNameEl.textContent = mine.group_name;
-    // 이름은 예전 흔적(__CURRENT_MEMBERSHIP_ID__)이지만 이제 담는 값은 내 profile id다 —
     // 책 소유/대여 상태를 그룹과 무관하게 "한 사람 것"으로 공유하기로 하면서, 책 관련
     // memberId는 전부 membership id 대신 profile id를 쓰도록 바뀌었다 (get_state의
     // members[].id도 profile id로 나간다. client.js는 이 값을 그냥 opaque id로만 쓰기 때문에
     // 수정 없이 그대로 동작한다).
-    window.__CURRENT_MEMBERSHIP_ID__ = user.id;
+    window.__CURRENT_PROFILE_ID__ = user.id;
     window.__MY_MEMBERSHIPS__ = memberships;
     try { localStorage.setItem(LAST_GROUP_KEY, groupId); } catch (e) { /* ignore */ }
 
@@ -241,21 +240,50 @@ window.__showInviteCode__ = async function () {
     var mine = (window.__MY_MEMBERSHIPS__ || []).find(function (m) { return m.group_id === groupId; });
     const { data, error } = await supabase.from('groups').select('invite_code').eq('id', groupId).single();
     if (error) { alert('초대 코드를 불러오지 못했어요: ' + error.message); return; }
-    alert((mine ? mine.group_name + '\n' : '') + '초대 코드: ' + data.invite_code + '\n\n이 코드를 공유하면 그룹에 참가할 수 있어요.');
+
+    // alert()은 브라우저마다 텍스트 선택/복사가 안 되는 경우가 많아서, 복사 버튼이 있는
+    // 모달로 대체한다 (client.js의 openModal과 같은 #modalSheet/#modalBackdrop을 그냥 직접 씀 —
+    // client.js 안쪽 함수라 여기서 못 불러서, 같은 DOM을 공유하는 식으로 처리).
+    var sheet = document.getElementById('modalSheet');
+    var backdrop = document.getElementById('modalBackdrop');
+    sheet.innerHTML =
+        '<h3>' + esc(mine ? mine.group_name : '초대 코드') + '</h3>' +
+        '<p style="font-size:12.5px;color:var(--pencil);margin-bottom:14px;">이 코드를 공유하면 그룹에 참가할 수 있어요.</p>' +
+        '<div class="field"><input type="text" id="inviteCodeInput" readonly value="' + esc(data.invite_code) + '" style="font-size:20px;font-weight:700;text-align:center;letter-spacing:2px;"></div>' +
+        '<button class="btn-primary" id="copyInviteCodeBtn">복사하기</button>' +
+        '<button class="close-x" id="modalCloseX">✕</button>';
+    backdrop.classList.add('open');
+
+    function close() { backdrop.classList.remove('open'); }
+    document.getElementById('modalCloseX').onclick = close;
+    backdrop.onclick = function (e) { if (e.target.id === 'modalBackdrop') close(); };
+
+    var copyBtn = document.getElementById('copyInviteCodeBtn');
+    copyBtn.onclick = async function () {
+        var input = document.getElementById('inviteCodeInput');
+        try {
+            await navigator.clipboard.writeText(data.invite_code);
+        } catch (e) {
+            input.select();
+            document.execCommand('copy');
+        }
+        copyBtn.textContent = '복사됐어요!';
+        setTimeout(function () { copyBtn.textContent = '복사하기'; }, 1500);
+    };
 };
 window.__signOut__ = async function () {
     await supabase.auth.signOut();
     window.__CURRENT_GROUP_ID__ = null;
-    window.__CURRENT_MEMBERSHIP_ID__ = null;
+    window.__CURRENT_PROFILE_ID__ = null;
     renderSignInScreen();
 };
 
-// 프로필 사진 업로드: 본인 membership 폴더 아래에만 쓸 수 있도록 Storage RLS가 막아준다.
+// 프로필 사진 업로드: 본인 profile 폴더 아래에만 쓸 수 있도록 Storage RLS가 막아준다.
 window.__uploadAvatarPhoto__ = async function (file) {
-    var membershipId = window.__CURRENT_MEMBERSHIP_ID__;
-    if (!membershipId) throw new Error('로그인이 필요해요.');
+    var profileId = window.__CURRENT_PROFILE_ID__;
+    if (!profileId) throw new Error('로그인이 필요해요.');
     var ext = (file.name && file.name.split('.').pop()) || 'jpg';
-    var path = membershipId + '/' + Date.now() + '.' + ext;
+    var path = profileId + '/' + Date.now() + '.' + ext;
     const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, {
         upsert: true,
         contentType: file.type || 'image/jpeg'
@@ -294,6 +322,7 @@ async function dispatchServerCall(fnName, args) {
                 p_owner_membership_id: payload.ownerId,
                 p_status: payload.status,
                 p_start_date: payload.startDate,
+                p_end_date: payload.endDate,
                 p_cover_url: payload.coverUrl,
                 p_publisher: payload.publisher,
                 p_isbn13: payload.isbn13,
@@ -317,16 +346,25 @@ async function dispatchServerCall(fnName, args) {
             return rpc('assign_reader', { p_group_id: groupId, p_book_id: args[0], p_member_id: args[1], p_start_date: args[2] || null, p_exchange_date: args[3] || null });
 
         case 'markFinished':
-            return rpc('mark_finished', { p_group_id: groupId, p_book_id: args[0], p_requester_id: args[1], p_review: args[2] || null });
+            return rpc('mark_finished', { p_group_id: groupId, p_book_id: args[0], p_requester_id: args[1], p_review: args[2] || null, p_end_date: args[3] || null });
 
         case 'updateBookProgress':
             return rpc('update_book_progress', { p_group_id: groupId, p_book_id: args[0], p_requester_id: args[1], p_current_page: args[2], p_page_count: args[3] });
+
+        case 'updateReadingStartDate':
+            return rpc('update_reading_start_date', { p_group_id: groupId, p_book_id: args[0], p_actor_id: args[1], p_start_date: args[2] });
+
+        case 'updateLastHistoryDates':
+            return rpc('update_last_history_dates', { p_group_id: groupId, p_book_id: args[0], p_actor_id: args[1], p_start_date: args[2], p_end_date: args[3] });
 
         case 'setBookWantToRead':
             return rpc('set_book_want_to_read', { p_group_id: groupId, p_book_id: args[0], p_actor_id: args[1], p_want_to_read: !!args[2] });
 
         case 'toggleBookHeart':
             return rpc('toggle_book_heart', { p_group_id: groupId, p_book_id: args[0], p_member_id: args[1], p_hearted: !!args[2] });
+
+        case 'toggleBookRecommend':
+            return rpc('toggle_book_recommend', { p_group_id: groupId, p_book_id: args[0], p_member_id: args[1], p_recommended: !!args[2], p_comment: args[3] || null });
 
         case 'searchKakaoBooks': {
             const { data, error } = await supabase.functions.invoke('search-kakao-books', { body: { query: args[0] } });
@@ -346,7 +384,10 @@ async function dispatchServerCall(fnName, args) {
         case 'updateMemberNotify':
             return rpc('update_member_notify', {
                 p_group_id: groupId, p_membership_id: args[0], p_email: args[1],
-                p_notify_time: args[2], p_notify_days: args[3], p_enabled: !!args[4]
+                p_notify_time: args[2], p_notify_days: args[3], p_enabled: !!args[4],
+                p_notify_on_comment: args[5] === undefined ? true : !!args[5],
+                p_notify_on_heart: args[6] === undefined ? true : !!args[6],
+                p_notify_on_recommend: args[7] === undefined ? true : !!args[7]
             });
 
         // ---- 위시리스트 ("이 책 찾아요") ----
@@ -412,6 +453,10 @@ async function dispatchServerCall(fnName, args) {
             return rpc('add_book_text_memo', { p_group_id: groupId, p_book_id: args[0], p_author_id: args[1], p_text: args[2] });
         case 'addRecordComment':
             return rpc('add_record_comment', { p_group_id: groupId, p_entity_type: args[0], p_entity_id: args[1], p_photo_id: args[2], p_member_id: args[3], p_text: args[4] });
+        case 'toggleRecordItemHeart':
+            return rpc('toggle_record_item_heart', { p_group_id: groupId, p_entity_type: args[0], p_entity_id: args[1], p_item_id: args[2], p_parent_photo_id: args[3], p_member_id: args[4], p_liked: args[5] });
+        case 'setBookReview':
+            return rpc('set_book_review', { p_group_id: groupId, p_book_id: args[0], p_member_id: args[1], p_review: args[2] });
 
         // ---- 교환일 제안/투표/참석/사진 ----
         case 'proposeExchangeDate':

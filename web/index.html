@@ -24,16 +24,17 @@
 
 <header class="topbar" id="topbar" style="display:none;">
   <div class="brand">
-    <span class="brand-mark" id="currentGroupName">구름멍멍교환독서클럽</span>
+    <span class="brand-mark" id="currentGroupName" title="홈으로">구름멍멍교환독서클럽</span>
     <span class="brand-sub mono">책에 돈보다 시간을 쓰자</span>
+    <button class="refresh-btn" id="refreshAppBtn" title="새로고침" aria-label="새로고침">🔄</button>
   </div>
   <nav class="tabs">
     <button class="tab-btn active" data-view="home">홈</button>
-    <button class="tab-btn" data-view="shelf">우리 서고</button>
-    <button class="tab-btn" data-view="wishlist">이 책 찾아요</button>
+    <button class="tab-btn" data-view="shelf">서고</button>
     <button class="tab-btn" data-view="records">독서기록</button>
+    <button class="tab-btn" data-view="recommend">추천</button>
+    <button class="tab-btn" data-view="wishlist">이 책 찾아요</button>
     <button class="tab-btn" data-view="members">멤버</button>
-    <button class="tab-btn" data-view="myPage">마이페이지</button>
   </nav>
   <div id="loginStatusBox"></div>
 </header>
