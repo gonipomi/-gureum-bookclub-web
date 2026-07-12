@@ -61,6 +61,11 @@ function renderSignInScreen() {
         '<button class="btn-primary" id="signInBtn" style="margin-top:10px;">로그인</button>' +
         '<button class="btn-secondary" id="signUpBtn" style="margin-top:8px;">처음이에요 (가입하기)</button>' +
         '<p id="authGateMsg" style="font-size:12.5px;margin-top:10px;min-height:1.4em;"></p>' +
+        '<details style="margin-top:18px;font-size:12px;color:var(--pencil);line-height:1.6;">' +
+        '<summary style="cursor:pointer;color:var(--ink-soft);">📱 홈 화면에 앱처럼 추가하기</summary>' +
+        '<p style="margin-top:8px;"><b>아이폰(사파리)</b><br>공유 버튼(⬆️) 누르고 &rarr; "홈 화면에 추가"</p>' +
+        '<p style="margin-top:8px;"><b>안드로이드(크롬)</b><br>오른쪽 위 점 세 개(⋮) 메뉴 &rarr; "홈 화면에 추가" 또는 "앱 설치"</p>' +
+        '</details>' +
         '</div>'
     );
     function readCreds() {
