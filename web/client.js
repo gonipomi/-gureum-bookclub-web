@@ -444,7 +444,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 
         var statusHtml = '';
         if (reader) {
-            statusHtml = '<span class="stamp">READING</span><span class="reader-name">' + escapeHtml(reader.name) + '</span>';
+            // 홈 카드는 이미 "우리가 지금 읽는 책" 박스 안이라 READING 딱지는 중복 정보라 뺐다.
+            statusHtml = '<span class="reader-name">' + escapeHtml(reader.name) + '</span>';
         } else if (b.status === 'finished') {
             statusHtml = '<span class="stamp done">DONE</span>';
         } else {
@@ -499,13 +500,14 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             }
         }
 
-        var queueText = '아직 기다리는 사람이 없어요.';
-        var queueClass = 'queue-empty';
+        // 대기자가 없으면 "아직 기다리는 사람이 없어요" 같은 무의미한 기본 문구 대신 그냥 아무것도 안 보여준다.
+        var queueWaitingHtml = '';
         if (queue.length > 0) {
             var queueNames = queue.map(function (q) {
                 var m = getMember(qMemberId(q));
                 return m ? m.name : null;
             }).filter(Boolean);
+            var queueText;
             if (queueNames.length === 1) {
                 queueText = '💛 ' + escapeHtml(queueNames[0]) + '님이 기다리고 있어요';
             } else if (queueNames.length > 1) {
@@ -513,7 +515,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             } else {
                 queueText = '💛 ' + queue.length + '명이 기다리고 있어요';
             }
-            queueClass = 'queue-waiting-highlight';
+            queueWaitingHtml = '<span class="queue-waiting-highlight">' + queueText + '</span>';
         }
 
         // 홈 카드는 최대한 압축 — 댓글은 미리보기 박스 대신 작은 배지만 두고, 실제로 달거나
@@ -543,20 +545,25 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             ? '<button class="heart-btn heart-toggle" data-book="' + b.id + '">📖 읽기 신청</button>'
             : '';
 
+        // 표지 밑에 남는 여백에 진행률을 채운다 (쪽수를 입력해둔 책만 — 없으면 그냥 비워둔다).
+        var thumbProgressHtml = '';
+        if (parseInt(b.pageCount || 0, 10) > 0) {
+            thumbProgressHtml = '<div class="thumb-progress"><div class="thumb-progress-fill" style="width:' + bookProgressPercent(b) + '%;"></div></div>';
+        }
+
         return '<div class="due-card" data-book="' + b.id + '">' +
             '<div class="due-card-top">' +
-            '<div class="book-thumb">' + bookThumbHtml(b) + '</div>' +
+            '<div class="thumb-col"><div class="book-thumb">' + bookThumbHtml(b) + '</div>' + thumbProgressHtml + '</div>' +
             '<div class="due-card-info">' +
             '<div class="title">' + escapeHtml(b.title) + '</div>' +
             '<div class="author">' + escapeHtml(b.author || '저자 미상') + '</div>' +
             '<div class="stamp-row">' + statusHtml + commentBadgeHtml + '</div>' +
             (priorityLineHtml ? '<div class="due-card-extra">' + priorityLineHtml + '</div>' : '') +
             '</div></div>' +
-            '<div class="due-card-bottom">' +
-            '<span class="' + queueClass + '">' + queueText + '</span>' +
-            joinQueueBtnHtml +
-            heartCardBtn +
-            '</div></div>';
+            (queueWaitingHtml || joinQueueBtnHtml || heartCardBtn
+                ? '<div class="due-card-bottom">' + queueWaitingHtml + joinQueueBtnHtml + heartCardBtn + '</div>'
+                : '') +
+            '</div>';
     }
     function exchangeCommentPreviewHtml_(dateStr) {
         var proposal = (state.exchangeProposals || []).find(function (p) { return p.date === dateStr; });
