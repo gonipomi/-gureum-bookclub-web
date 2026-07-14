@@ -400,7 +400,7 @@
   .photo-lightbox .lb-heart-row .record-heart-btn{ font-size:15px; color:#fff; margin-left:0; padding:4px 10px; border:1.5px solid rgba(255,255,255,0.5); border-radius:999px; }
   .photo-lightbox .lb-heart-row .record-heart-btn.liked{ border-color:var(--stamp); }
   .photo-lightbox .lb-comments .record-heart-btn{ color:var(--pencil); }
-  .photo-lightbox .lb-close{ position:absolute; top:20px; right:20px; background:none; border:none; color:#fff; font-size:24px; cursor:pointer; }
+  .photo-lightbox .lb-close{ position:absolute; top:max(20px, env(safe-area-inset-top)); right:20px; background:none; border:none; color:#fff; font-size:24px; cursor:pointer; padding:10px; }
   .photo-lightbox .lb-delete{ margin-top:14px; background:none; border:var(--border-w) solid var(--stamp); color:var(--stamp); padding:6px 14px; border-radius:var(--radius-pill); font-size:12px; cursor:pointer; }
 
   .entry-list{ display:flex; flex-direction:column; gap:10px; }
