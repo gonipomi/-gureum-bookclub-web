@@ -305,6 +305,8 @@
   .cal-today .cal-daynum{ color:var(--ink); font-weight:700; text-decoration:underline; }
   .cal-confirmed{ background:var(--card-bg); border-color:var(--stamp); cursor:pointer; }
   .cal-proposal{ background:var(--gold-bg); border:1px dashed var(--gold); cursor:pointer; }
+  .cal-resolved{ background:var(--card-bg); border-color:var(--pencil); cursor:pointer; opacity:0.6; }
+  .cal-resolved-icon{ font-size:10px; line-height:1; }
 
   .empty-state{ text-align:center; padding: 50px 20px; color: var(--pencil); }
   .empty-state .stamp-big{

@@ -63,7 +63,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 (function () {
     // ============ 상태 / 로그인 세션 ============
     var COLORS = ['var(--stamp)', 'var(--line-green)', 'var(--ink-soft)', '#C97A3D', '#7A5C8A', '#3D7A8A', '#8A5C5C', '#5C6A8A'];
-    var state = { members: [], books: [], wishlist: [], nextExchangeDate: null, exchangeProposals: [], confirmedExchangeDates: [] };
+    var state = { members: [], books: [], wishlist: [], nextExchangeDate: null, exchangeProposals: [], confirmedExchangeDates: [], resolvedExchangeDates: [] };
     var currentView = 'home';
     var detailBookId = null;
     var detailMemberId = null;
@@ -133,7 +133,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             wishlist: Array.isArray(result.wishlist) ? result.wishlist : [],
             nextExchangeDate: result.nextExchangeDate || null,
             exchangeProposals: Array.isArray(result.exchangeProposals) ? result.exchangeProposals : [],
-            confirmedExchangeDates: Array.isArray(result.confirmedExchangeDates) ? result.confirmedExchangeDates : []
+            confirmedExchangeDates: Array.isArray(result.confirmedExchangeDates) ? result.confirmedExchangeDates : [],
+            resolvedExchangeDates: Array.isArray(result.resolvedExchangeDates) ? result.resolvedExchangeDates : []
         };
         lastLoadError = null;
     }
@@ -597,6 +598,10 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         (state.confirmedExchangeDates || []).forEach(function (d) { confirmedByDate[d.date] = d; });
         var proposalByDate = {};
         visibleProposals_().forEach(function (p) { proposalByDate[p.date] = p; });
+        // 완료/취소 처리된 날짜는 "확정된 교환일" 목록에서는 빠지지만, 달력에서는 계속
+        // 찾아 들어가서 사진·기록을 볼 수 있어야 한다 — 다른 표시(체크/취소 아이콘)로 남긴다.
+        var resolvedByDate = {};
+        (state.resolvedExchangeDates || []).forEach(function (r) { resolvedByDate[r.date] = r.status; });
 
         var cells = [];
         for (var i = 0; i < firstWeekday; i++) cells.push('<div class="cal-cell cal-cell-empty"></div>');
@@ -604,13 +609,16 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             var dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
             var confirmed = confirmedByDate[dateStr];
             var proposal = proposalByDate[dateStr];
+            var resolvedStatus = resolvedByDate[dateStr];
             var memberIds = confirmed ? confirmed.memberIds : (proposal ? proposal.votes : []);
-            var dotsHtml = (memberIds || []).slice(0, 6).map(function (mid) {
-                var m = getMember(mid);
-                return m ? '<span class="cal-dot" style="' + avatarStyle(m.color) + '"></span>' : '';
-            }).join('');
-            var cellClass = 'cal-cell' + (confirmed ? ' cal-confirmed' : (proposal ? ' cal-proposal' : '')) + (dateStr === todayStr ? ' cal-today' : '');
-            var clickAttr = (confirmed || proposal) ? ' data-detail-date="' + dateStr + '"' : '';
+            var dotsHtml = resolvedStatus
+                ? '<span class="cal-resolved-icon">' + (resolvedStatus === 'completed' ? '✅' : '🚫') + '</span>'
+                : (memberIds || []).slice(0, 6).map(function (mid) {
+                    var m = getMember(mid);
+                    return m ? '<span class="cal-dot" style="' + avatarStyle(m.color) + '"></span>' : '';
+                }).join('');
+            var cellClass = 'cal-cell' + (confirmed ? ' cal-confirmed' : (proposal ? ' cal-proposal' : (resolvedStatus ? ' cal-resolved' : ''))) + (dateStr === todayStr ? ' cal-today' : '');
+            var clickAttr = (confirmed || proposal || resolvedStatus) ? ' data-detail-date="' + dateStr + '"' : '';
             cells.push('<div class="' + cellClass + '"' + clickAttr + '><span class="cal-daynum">' + day + '</span><div class="cal-dots">' + dotsHtml + '</div></div>');
         }
         var monthLabel = year + '년 ' + (month + 1) + '월';
@@ -4095,7 +4103,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                     + '</div>' + removeBtn + '</div></div>';
             }).join('') + '</div>';
 
-        var addableBooks = myId ? state.books.filter(function (b) { return b.status === 'reading' && b.currentReaderId === myId && b.nextExchangeDate !== dateStr; }) : [];
+        var isResolved = (state.resolvedExchangeDates || []).some(function (r) { return r.date === dateStr; });
+        var addableBooks = (myId && !isResolved) ? state.books.filter(function (b) { return b.status === 'reading' && b.currentReaderId === myId && b.nextExchangeDate !== dateStr; }) : [];
         var addHtml = addableBooks.length
             ? '<button class="btn-secondary" id="addBookToDateBtn" style="margin-bottom:14px;">+ 내 책 가져가기</button>'
             : '';
@@ -4144,11 +4153,14 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     function openExchangeDateDetailModal(dateStr) {
         var dateGroup = (state.confirmedExchangeDates || []).find(function (d) { return d.date === dateStr; });
         var proposal = (state.exchangeProposals || []).find(function (p) { return p.date === dateStr; });
+        var resolved = (state.resolvedExchangeDates || []).find(function (r) { return r.date === dateStr; });
         var names = dateGroup ? memberNamesText(dateGroup.memberIds) : (proposal ? memberNamesText(proposal.votes) : '');
 
-        var resolveHtml = dateGroup
-            ? '<div class="exchange-actions" style="margin-bottom:14px;"><button class="heart-btn" data-resolve-date="' + dateStr + '" data-resolve-status="completed">✅ 모임 완료</button><button class="btn-text" style="color:var(--stamp);" data-resolve-date="' + dateStr + '" data-resolve-status="cancelled">모임 취소</button></div>'
-            : '';
+        var resolveHtml = resolved
+            ? '<p style="font-size:12.5px;color:var(--pencil);margin-bottom:14px;">' + (resolved.status === 'completed' ? '✅ 완료된 모임이에요.' : '🚫 취소된 모임이에요.') + '</p>'
+            : (dateGroup
+                ? '<div class="exchange-actions" style="margin-bottom:14px;"><button class="heart-btn" data-resolve-date="' + dateStr + '" data-resolve-status="completed">✅ 모임 완료</button><button class="btn-text" style="color:var(--stamp);" data-resolve-date="' + dateStr + '" data-resolve-status="cancelled">모임 취소</button></div>'
+                : '');
         openModal('<h3>' + fmtDateFull(dateStr) + '</h3>'
             + (names ? '<p style="font-size:12.5px;color:var(--pencil);margin-bottom:14px;">👥 ' + escapeHtml(names) + '</p>' : '')
             + resolveHtml
