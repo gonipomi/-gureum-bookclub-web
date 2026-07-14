@@ -402,6 +402,11 @@
   .photo-lightbox .lb-comments .record-heart-btn{ color:var(--pencil); }
   .photo-lightbox .lb-close{ position:absolute; top:max(20px, env(safe-area-inset-top)); right:20px; background:none; border:none; color:#fff; font-size:24px; cursor:pointer; padding:10px; }
   .photo-lightbox .lb-delete{ margin-top:14px; background:none; border:var(--border-w) solid var(--stamp); color:var(--stamp); padding:6px 14px; border-radius:var(--radius-pill); font-size:12px; cursor:pointer; }
+  .photo-lightbox .lb-nav{ position:absolute; top:50%; transform:translateY(-50%); background:rgba(0,0,0,0.35); border:none; color:#fff; font-size:28px; line-height:1; width:44px; height:44px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .photo-lightbox .lb-nav:disabled{ opacity:0.25; cursor:default; }
+  .photo-lightbox .lb-prev{ left:8px; }
+  .photo-lightbox .lb-next{ right:8px; }
+  .photo-lightbox .lb-counter{ position:absolute; top:max(20px, env(safe-area-inset-top)); left:50%; transform:translateX(-50%); color:#fff; font-size:12px; font-family:'JetBrains Mono',monospace; opacity:0.8; }
 
   .entry-list{ display:flex; flex-direction:column; gap:10px; }
   .entry-item{

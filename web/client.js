@@ -637,6 +637,11 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 var ddayText = dday === 0 ? 'D-DAY' : (dday > 0 ? 'D-' + dday : Math.abs(dday) + '일 지남');
                 var names = memberNamesText(d.memberIds);
                 var exchangeBookCount = state.books.filter(function (b) { return b.status === 'reading' && b.nextExchangeDate === d.date; }).length;
+                // 날짜가 지났거나 오늘이면 참석/불참 대신 완료/취소 처리를 유도한다 —
+                // 지난 모임에 "참석할래요" 버튼은 의미가 없고, 계속 화면에 남아있으면 안 되니까.
+                var actionsHtml = (dday !== null && dday <= 0)
+                    ? '<div class="exchange-actions"><button class="heart-btn" data-resolve-date="' + d.date + '" data-resolve-status="completed">✅ 모임 완료</button><button class="btn-text" style="color:var(--stamp);" data-resolve-date="' + d.date + '" data-resolve-status="cancelled">모임 취소</button></div>'
+                    : '<div class="exchange-actions"><button class="heart-btn home-join-date-btn" data-date="' + d.date + '">참석</button><button class="btn-text" data-cancel-date="' + d.date + '">불참</button></div>';
                 return '<div class="due-card exchange-mini-card" style="cursor:default;">' +
                     '<div class="exchange-mini-top" data-detail-date="' + d.date + '">' +
                     '<div class="exchange-mini-head"><div class="exchange-mini-date">' + fmtDateFull(d.date) + '</div><span class="exchange-mini-dday">' + ddayText + '</span></div>' +
@@ -644,7 +649,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                     '<div class="exchange-mini-names">' + (names ? escapeHtml(names) : '참석자 없음') + '</div>' +
                     exchangeCommentPreviewHtml_(d.date) +
                     '</div>' +
-                    '<div class="exchange-actions"><button class="heart-btn home-join-date-btn" data-date="' + d.date + '">참석</button><button class="btn-text" data-cancel-date="' + d.date + '">불참</button></div>' +
+                    actionsHtml +
                     '</div>';
             }).join('');
             confirmedSection += '</div>';
@@ -1047,7 +1052,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             var r = g.items[0];
             var author = getMember(r.photo.authorId);
             var countBadge = g.items.length > 1 ? '<span class="record-count-badge">' + g.items.length + '</span>' : '';
-            return '<div class="record-card" data-record-kind="' + r.kind + '" data-record-entity="' + escapeHtml(r.entityId) + '" data-record-photo="' + escapeHtml(r.photo.id) + '">' +
+            var groupIds = g.items.map(function (it) { return it.photo.id; }).join(',');
+            return '<div class="record-card" data-record-kind="' + r.kind + '" data-record-entity="' + escapeHtml(r.entityId) + '" data-record-photo="' + escapeHtml(r.photo.id) + '" data-record-group="' + escapeHtml(groupIds) + '">' +
                 '<img src="' + photoDisplayUrl(r.photo) + '">' + countBadge +
                 '<div class="record-card-body"><div class="record-title">' + escapeHtml(r.title) + '</div>' +
                 '<div class="record-meta">' + (r.photo.caption ? escapeHtml(r.photo.caption) + '<br>' : '') +
@@ -1095,7 +1101,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var r = g.items[0];
         var author = getMember(r.photo.authorId);
         var countBadge = g.items.length > 1 ? ' <span class="entry-count-badge">+' + (g.items.length - 1) + '</span>' : '';
-        return '<div class="entry-item" data-record-kind="' + r.kind + '" data-record-entity="' + escapeHtml(r.entityId) + '" data-record-photo="' + escapeHtml(r.photo.id) + '" style="cursor:pointer;">'
+        var groupIds = g.items.map(function (it) { return it.photo.id; }).join(',');
+        return '<div class="entry-item" data-record-kind="' + r.kind + '" data-record-entity="' + escapeHtml(r.entityId) + '" data-record-photo="' + escapeHtml(r.photo.id) + '" data-record-group="' + escapeHtml(groupIds) + '" style="cursor:pointer;">'
             + '<div class="entry-photo"><img src="' + photoDisplayUrl(r.photo) + '"></div>'
             + '<div class="entry-body">'
             + '<div class="entry-caption"><b>' + escapeHtml(r.title) + '</b>' + countBadge + (r.photo.caption ? '<br>' + escapeHtml(r.photo.caption) : '') + '</div>'
@@ -3207,6 +3214,24 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         document.querySelectorAll('[data-cancel-date]').forEach(function (btn) {
             btn.onclick = function () { return openLeaveExchangeDateMemberPicker(btn.dataset.cancelDate); };
         });
+        document.querySelectorAll('[data-resolve-date]').forEach(function (btn) {
+            btn.onclick = function () {
+                var dateStr = btn.dataset.resolveDate;
+                var status = btn.dataset.resolveStatus;
+                if (status === 'cancelled' && !confirm(fmtDateFull(dateStr) + ' 모임을 취소할까요? 잡혀있던 교환일이 풀려요.')) return;
+                requireLogin(async function (myId) {
+                    setBtnLoading(btn, '처리 중...');
+                    try {
+                        applyState(await callServer('resolveExchangeDate', dateStr, status, myId));
+                        render();
+                        showToast(status === 'completed' ? '모임을 완료 처리했어요' : '모임을 취소했어요');
+                    } catch (err) {
+                        showToast(err.message || '실패', true);
+                        resetBtn(btn);
+                    }
+                });
+            };
+        });
         document.querySelectorAll('[data-switch-group]').forEach(function (btn) {
             btn.onclick = function () {
                 if (window.__switchGroup__) window.__switchGroup__(btn.dataset.switchGroup);
@@ -3641,8 +3666,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             el.onclick = function () {
                 var kind = el.dataset.recordKind || 'book';
                 var entityId = el.dataset.recordEntity;
-                var p = findRecordPhoto_(kind, entityId, el.dataset.recordPhoto);
-                if (p) openLightbox(p, kind, entityId);
+                var groupIds = (el.dataset.recordGroup || el.dataset.recordPhoto).split(',');
+                var p = findRecordPhoto_(kind, entityId, groupIds[0]);
+                if (p) openLightbox(p, kind, entityId, groupIds, 0);
             };
         });
         document.querySelectorAll('[data-records-category]').forEach(function (el) {
@@ -4120,8 +4146,12 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var proposal = (state.exchangeProposals || []).find(function (p) { return p.date === dateStr; });
         var names = dateGroup ? memberNamesText(dateGroup.memberIds) : (proposal ? memberNamesText(proposal.votes) : '');
 
+        var resolveHtml = dateGroup
+            ? '<div class="exchange-actions" style="margin-bottom:14px;"><button class="heart-btn" data-resolve-date="' + dateStr + '" data-resolve-status="completed">✅ 모임 완료</button><button class="btn-text" style="color:var(--stamp);" data-resolve-date="' + dateStr + '" data-resolve-status="cancelled">모임 취소</button></div>'
+            : '';
         openModal('<h3>' + fmtDateFull(dateStr) + '</h3>'
             + (names ? '<p style="font-size:12.5px;color:var(--pencil);margin-bottom:14px;">👥 ' + escapeHtml(names) + '</p>' : '')
+            + resolveHtml
             + '<div class="section-label" style="margin:0 0 8px;"><span class="num mono">B</span><h2>책 흐름</h2><span class="line"></span></div>'
             + '<div id="exchangeDateFlowBox">' + exchangeDateFlowHtml_(dateStr) + '</div>'
             + '<div class="section-label" style="margin:0 0 8px;"><span class="num mono">P</span><h2>모임 사진</h2><span class="line"></span></div>'
@@ -4138,6 +4168,24 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         wireExchangeDateDetailEvents_(dateStr);
     }
     function wireExchangeDateDetailEvents_(dateStr) {
+        document.querySelectorAll('[data-resolve-date]').forEach(function (btn) {
+            btn.onclick = function () {
+                var status = btn.dataset.resolveStatus;
+                if (status === 'cancelled' && !confirm(fmtDateFull(dateStr) + ' 모임을 취소할까요? 잡혀있던 교환일이 풀려요.')) return;
+                requireLogin(async function (myId) {
+                    setBtnLoading(btn, '처리 중...');
+                    try {
+                        applyState(await callServer('resolveExchangeDate', dateStr, status, myId));
+                        closeModal();
+                        render();
+                        showToast(status === 'completed' ? '모임을 완료 처리했어요' : '모임을 취소했어요');
+                    } catch (err) {
+                        showToast(err.message || '실패', true);
+                        resetBtn(btn);
+                    }
+                });
+            };
+        });
         document.querySelectorAll('#exchangeDateFlowBox [data-goto-book]').forEach(function (btn) {
             btn.onclick = function () {
                 closeModal();
@@ -4292,7 +4340,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             : (getBook(entityId) || {}).photos;
         return (list || []).find(function (x) { return x.id === photoId; }) || null;
     }
-    function openLightbox(p, entityType, entityId) {
+    function openLightbox(p, entityType, entityId, groupIds, groupIndex) {
+        groupIds = groupIds || [p.id];
+        groupIndex = groupIndex || 0;
         var lb = document.createElement('div');
         lb.className = 'photo-lightbox';
         var lbBook = entityType === 'book' ? getBook(entityId) : null;
@@ -4310,11 +4360,25 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             }).join('')
             : '<p style="font-size:12px;color:var(--pencil);">아직 댓글이 없어요.</p>';
         var photoHeartHtml = recordHeartBtnHtml_(entityType, entityId, p.id, null, p.hearts);
-        lb.innerHTML = "\n    <button class=\"lb-close\">✕</button>\n    <img src=\"" + photoDisplayUrl(p) + "\">\n    " + titleHtml + (p.caption ? "<div class=\"lb-caption\">" + escapeHtml(p.caption) + "</div>" : '') + "\n    <div class=\"lb-heart-row\">" + photoHeartHtml + "</div>\n    <button class=\"lb-delete\">사진 삭제</button>\n    <div class=\"lb-comments\" style=\"background:var(--card-bg);border-radius:8px;padding:10px 12px;margin-top:10px;max-height:160px;overflow-y:auto;\">\n      " + commentsHtml + "\n    </div>\n    <div class=\"assign-select-row\" style=\"margin-top:8px;\">\n      <input type=\"text\" id=\"lbCommentInput\" class=\"input-plain\" placeholder=\"댓글 남기기\" maxlength=\"300\" style=\"flex:1;\">\n      <button class=\"heart-btn\" id=\"lbCommentBtn\" style=\"flex-shrink:0;\">남기기</button>\n    </div>\n  ";
+        var navHtml = groupIds.length > 1
+            ? "\n    <button class=\"lb-nav lb-prev\"" + (groupIndex <= 0 ? ' disabled' : '') + ">‹</button>\n    <button class=\"lb-nav lb-next\"" + (groupIndex >= groupIds.length - 1 ? ' disabled' : '') + ">›</button>\n    <div class=\"lb-counter\">" + (groupIndex + 1) + " / " + groupIds.length + "</div>"
+            : '';
+        lb.innerHTML = "\n    <button class=\"lb-close\">✕</button>\n    " + navHtml + "\n    <img src=\"" + photoDisplayUrl(p) + "\">\n    " + titleHtml + (p.caption ? "<div class=\"lb-caption\">" + escapeHtml(p.caption) + "</div>" : '') + "\n    <div class=\"lb-heart-row\">" + photoHeartHtml + "</div>\n    <button class=\"lb-delete\">사진 삭제</button>\n    <div class=\"lb-comments\" style=\"background:var(--card-bg);border-radius:8px;padding:10px 12px;margin-top:10px;max-height:160px;overflow-y:auto;\">\n      " + commentsHtml + "\n    </div>\n    <div class=\"assign-select-row\" style=\"margin-top:8px;\">\n      <input type=\"text\" id=\"lbCommentInput\" class=\"input-plain\" placeholder=\"댓글 남기기\" maxlength=\"300\" style=\"flex:1;\">\n      <button class=\"heart-btn\" id=\"lbCommentBtn\" style=\"flex-shrink:0;\">남기기</button>\n    </div>\n  ";
         document.body.appendChild(lb);
         lb.querySelector('.lb-close').onclick = function () { return lb.remove(); };
         lb.onclick = function (e) { if (e.target === lb)
             lb.remove(); };
+        function goToIndex_(newIndex) {
+            if (newIndex < 0 || newIndex >= groupIds.length) return;
+            var freshP = findRecordPhoto_(entityType, entityId, groupIds[newIndex]);
+            if (!freshP) return;
+            lb.remove();
+            openLightbox(freshP, entityType, entityId, groupIds, newIndex);
+        }
+        if (groupIds.length > 1) {
+            lb.querySelector('.lb-prev').onclick = function (e) { e.stopPropagation(); goToIndex_(groupIndex - 1); };
+            lb.querySelector('.lb-next').onclick = function (e) { e.stopPropagation(); goToIndex_(groupIndex + 1); };
+        }
         var lbTitleEl = lb.querySelector('.lb-title');
         if (lbTitleEl) {
             lbTitleEl.onclick = function (e) {
@@ -4333,6 +4397,12 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 lb.remove();
                 render();
                 showToast('사진을 삭제했어요');
+                var remainingIds = groupIds.filter(function (id) { return id !== p.id; });
+                if (remainingIds.length) {
+                    var nextIndex = Math.min(groupIndex, remainingIds.length - 1);
+                    var nextP = findRecordPhoto_(entityType, entityId, remainingIds[nextIndex]);
+                    if (nextP) openLightbox(nextP, entityType, entityId, remainingIds, nextIndex);
+                }
             } catch (err) {
                 showToast(err.message || '삭제 실패', true);
             }
@@ -4348,7 +4418,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 lb.remove();
                 render();
                 var freshP = findRecordPhoto_(entityType, entityId, p.id);
-                if (freshP) openLightbox(freshP, entityType, entityId);
+                if (freshP) openLightbox(freshP, entityType, entityId, groupIds, groupIndex);
             } catch (err) {
                 showToast(err.message || '실패', true);
             }
@@ -4364,7 +4434,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                     render();
                     lb.remove();
                     var freshP = findRecordPhoto_(entityType, entityId, p.id);
-                    if (freshP) openLightbox(freshP, entityType, entityId);
+                    if (freshP) openLightbox(freshP, entityType, entityId, groupIds, groupIndex);
                 } catch (err) {
                     showToast(err.message || '실패', true);
                 }

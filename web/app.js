@@ -478,6 +478,8 @@ async function dispatchServerCall(fnName, args) {
             return rpc('leave_exchange_date', { p_group_id: groupId, p_date: args[0], p_member_id: args[1] });
         case 'removeBookFromExchangeDate':
             return rpc('remove_book_from_exchange_date', { p_group_id: groupId, p_date: args[0], p_book_id: args[1], p_actor_id: args[2] });
+        case 'resolveExchangeDate':
+            return rpc('resolve_exchange_date', { p_group_id: groupId, p_date: args[0], p_status: args[1], p_member_id: args[2] });
         case 'uploadExchangePhoto': {
             var exUrl = await dataUrlToStorageUrl(args[1], groupId + '/exchange/' + args[0]);
             return rpc('add_exchange_photo', { p_group_id: groupId, p_date: args[0], p_url: exUrl, p_caption: args[2], p_author_id: args[3] });
