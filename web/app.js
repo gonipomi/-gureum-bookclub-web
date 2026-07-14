@@ -139,8 +139,15 @@ function renderGroupGateScreen() {
         '<input type="text" id="gateInviteCode" placeholder="예: A7K92Q" maxlength="6" style="text-transform:uppercase;letter-spacing:2px;">' +
         '<button class="btn-secondary" id="joinGroupBtn" style="margin-top:8px;">코드로 참가하기</button>' +
         '<p id="authGateMsg" style="font-size:12.5px;margin-top:10px;min-height:1.4em;"></p>' +
+        '<button class="btn-text" id="gateBackToSignInBtn" style="width:100%;margin-top:14px;">&larr; 로그아웃하고 로그인 화면으로</button>' +
         '</div>'
     );
+    document.getElementById('gateBackToSignInBtn').onclick = async function () {
+        await supabase.auth.signOut();
+        window.__CURRENT_GROUP_ID__ = null;
+        window.__CURRENT_PROFILE_ID__ = null;
+        renderSignInScreen();
+    };
     document.getElementById('createGroupBtn').onclick = async function (e) {
         var name = document.getElementById('gateGroupName').value.trim();
         var displayName = document.getElementById('gateDisplayName').value.trim();
