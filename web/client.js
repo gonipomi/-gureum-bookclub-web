@@ -368,6 +368,26 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         }
         return '<div class="queue-item" style="flex-wrap:wrap;"><span class="qname" style="color:var(--pencil);">다른 모임 멤버에게서 신청이 왔어요.</span></div>';
     }
+    // 책주인이 볼 "읽기 신청" 목록 — 'finished'(완독)든 'shelved'(안읽음)든 지금 읽는
+    // 사람이 없는 책이면 누구나 신청할 수 있으므로, 두 상태 모두에서 같은 승인/거절 UI를 써야 한다.
+    function incomingReadRequestsSectionHtml_(b, incomingReadRequests) {
+        var html = '<div class="section-label" style="margin:0 0 8px;"><span class="num mono">R</span><h2>읽기 신청</h2><span class="line"></span></div>';
+        html += '<div class="queue-list" style="margin-bottom:12px;">';
+        html += incomingReadRequests.map(function (r) {
+            var m = getMember(r.memberId);
+            if (!m) return crossGroupRequestFallbackHtml_(r);
+            var dateText = r.desiredDate ? fmtDate(r.desiredDate) + ' 희망' : '날짜는 나중에';
+            return '<div class="queue-item" style="flex-wrap:wrap;">'
+                + '<div class="qavatar" style="' + avatarStyle(m.color) + '">' + avatarContent(m) + '</div>'
+                + '<span class="qname">' + escapeHtml(m.name) + ' · ' + dateText + '</span>'
+                + '<button class="heart-btn" data-approve-request="' + r.id + '" data-request-book="' + b.id + '" style="flex-shrink:0;">승인</button>'
+                + '<button class="btn-text" style="color:var(--stamp);" data-reject-request="' + r.id + '" data-request-book="' + b.id + '">거절</button>'
+                + '<button class="btn-text" data-counter-read-request="' + r.id + '" data-request-book="' + b.id + '">다른 날짜 제안</button>'
+                + '</div>';
+        }).join('');
+        html += '</div>';
+        return html;
+    }
     function memberNamesText(memberIds) {
         return (memberIds || []).map(function (id) {
             var m = getMember(id);
@@ -465,7 +485,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 
         var readRequestHtml = '';
         var incomingReadRequestCount = (b.readRequests || []).filter(function (r) { return !r.counterDate; }).length;
-        if (b.status === 'finished' && getLoggedInMemberId() === b.ownerId && incomingReadRequestCount) {
+        if (!b.currentReaderId && getLoggedInMemberId() === b.ownerId && incomingReadRequestCount) {
             readRequestHtml = '<div class="date-range" style="margin-top:4px;color:var(--stamp);">📩 읽기 신청 ' + incomingReadRequestCount + '건</div>';
         }
         var queueRequestCount = (b.queueRequests || []).filter(function (r) { return !r.counterDate; }).length;
@@ -1561,6 +1581,14 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             // 내 책이면 바로 읽기 시작, 남의 책이면(주인이 있는 책) 승인 절차(읽기 신청)를 거쳐야 한다.
             if (!myId || !b.ownerId || b.ownerId === myId) {
                 readActionHtml = '<button class="btn-primary" id="startReadingBtn">📖 이 책 읽기</button>';
+                // 'shelved'(안읽음) 책도 남이 바로 읽기 신청할 수 있어서, 완독 책과 마찬가지로
+                // 책주인에게 승인/거절 UI를 보여줘야 한다(이전엔 'finished'에서만 보여서 안 보이던 버그).
+                if (myId && myId === b.ownerId && b.status !== 'finished') {
+                    var incomingReadRequestsShelved = (b.readRequests || []).filter(function (r) { return !r.counterDate; });
+                    if (incomingReadRequestsShelved.length) {
+                        readActionHtml += incomingReadRequestsSectionHtml_(b, incomingReadRequestsShelved);
+                    }
+                }
             } else if (b.externalBorrow) {
                 readActionHtml = '';
             } else {
@@ -1602,21 +1630,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             var myRequest_1 = (b.readRequests || []).find(function (r) { return r.memberId === myId; });
             var incomingReadRequests = (b.readRequests || []).filter(function (r) { return !r.counterDate; });
             if (myId && myId === b.ownerId && incomingReadRequests.length) {
-                finishedActionHtml += '<div class="section-label" style="margin:0 0 8px;"><span class="num mono">R</span><h2>읽기 신청</h2><span class="line"></span></div>';
-                finishedActionHtml += '<div class="queue-list" style="margin-bottom:12px;">';
-                finishedActionHtml += incomingReadRequests.map(function (r) {
-                    var m = getMember(r.memberId);
-                    if (!m) return crossGroupRequestFallbackHtml_(r);
-                    var dateText = r.desiredDate ? fmtDate(r.desiredDate) + ' 희망' : '날짜는 나중에';
-                    return '<div class="queue-item" style="flex-wrap:wrap;">'
-                        + '<div class="qavatar" style="' + avatarStyle(m.color) + '">' + avatarContent(m) + '</div>'
-                        + '<span class="qname">' + escapeHtml(m.name) + ' · ' + dateText + '</span>'
-                        + '<button class="heart-btn" data-approve-request="' + r.id + '" data-request-book="' + b.id + '" style="flex-shrink:0;">승인</button>'
-                        + '<button class="btn-text" style="color:var(--stamp);" data-reject-request="' + r.id + '" data-request-book="' + b.id + '">거절</button>'
-                        + '<button class="btn-text" data-counter-read-request="' + r.id + '" data-request-book="' + b.id + '">다른 날짜 제안</button>'
-                        + '</div>';
-                }).join('');
-                finishedActionHtml += '</div>';
+                finishedActionHtml += incomingReadRequestsSectionHtml_(b, incomingReadRequests);
             }
             if (!myId || myId !== b.ownerId) {
                 if (myRequest_1 && myRequest_1.counterDate) {
