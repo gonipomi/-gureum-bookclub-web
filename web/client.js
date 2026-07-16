@@ -1740,7 +1740,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                     var canRemove = myId && (myId === mid || myId === b.currentReaderId || canPassToNext);
                     var qActionButtons = canRemove ? '<button class="btn-text" style="color:var(--stamp);" data-remove-queue="' + b.id + '" data-remove-member="' + mid + '">빼기</button>' : '';
                     if (myId === b.currentReaderId || canPassToNext) {
-                        qActionButtons += '<button class="btn-text" data-pass-to="' + mid + '" data-pass-book="' + b.id + '">넘기기</button>';
+                        qActionButtons += '<button class="btn-text" data-pass-to="' + mid + '" data-pass-book="' + b.id + '"' + (desired ? ' data-pass-desired-date="' + desired + '"' : '') + '>넘기기</button>';
                         if (!desired) {
                             var sharedDate_1 = (state.confirmedExchangeDates || []).find(function (d) { return d.memberIds.indexOf(myId) > -1 && d.memberIds.indexOf(mid) > -1; });
                             if (sharedDate_1) {
@@ -3387,7 +3387,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                         case 3:
                             _a.sent();
                             render();
-                            showToast('승인했어요');
+                            // 승인은 대기열에 넣을 뿐, 실제로 "읽는 중"이 되는 건 나중에 대기열의
+                            // "넘기기"를 눌러야 한다 — 예전엔 승인=즉시 전달이었어서 헷갈리기 쉽다.
+                            showToast('승인했어요. 실제로 책을 건넬 때 대기열에서 "넘기기"를 눌러주세요.');
                             return [3 /*break*/, 5];
                         case 4:
                             err_34 = _a.sent();
@@ -3430,6 +3432,14 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 return __generator(this, function (_a) {
                     switch (_a.label) {
                         case 0:
+                            // 승인/수락 때 합의한 날짜가 아직 안 됐는데 "넘기기"부터 눌러버리는
+                            // 실수를 막는 확인창 — 승인은 대기열에만 넣고, 실제 전달은 이 버튼이
+                            // 하기 때문에 미리 눌러버리면 교환 예정일 전에 "읽는 중"이 돼버린다.
+                            if (btn.dataset.passDesiredDate && btn.dataset.passDesiredDate > new Date().toISOString().slice(0, 10)) {
+                                if (!confirm(fmtDate(btn.dataset.passDesiredDate) + '에 만나서 넘기기로 했어요. 아직 그 전인데 지금 바로 넘길까요?')) {
+                                    return [2 /*return*/];
+                                }
+                            }
                             setBtnLoading(btn, '넘기는 중...');
                             _a.label = 1;
                         case 1:
