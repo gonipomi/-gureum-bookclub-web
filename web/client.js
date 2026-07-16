@@ -825,19 +825,24 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     // "우리 서고"에선 의미가 없다 — "내 서고"에서만 탭으로 노출한다.
     var SHELF_NEXT_TO_READ_CATEGORY_ = { key: 'nextToRead', label: '다음에 읽을 책' };
     var SHELF_WANTED_CATEGORY_ = { key: 'wanted', label: '찜한 책' };
+    // "교환 예정"은 "우리 서고"에서만 의미가 있다 — 그룹 전체에서 곧 손이 바뀔 책을
+    // 한군데서 보는 용도라, 내 책만 보는 "내 서고"엔 안 넣는다.
+    var SHELF_EXCHANGE_SOON_CATEGORY_ = { key: 'exchangeSoon', label: '교환 예정' };
     var SHELF_EMPTY_TEXT_ = {
         wish: '🔍 아직 등록된 책이 없어요. 갖고 있는 사람이 있는지 물어볼 책을 등록해보세요.',
         reading: '📖 지금 읽는 책이 없어요.',
         unread: '🌱 아직 아무도 안 읽은 책이 없어요.',
         finished: '✅ 아직 다 읽은 책이 없어요.',
         nextToRead: '🌱 다음에 읽을 책으로 찜한 게 없어요. 안 읽은 책 카드에서 체크해보세요.',
-        wanted: '🤍 아직 찜한 책이 없어요. 다른 사람 책 상세에서 찜하기를 눌러보세요.'
+        wanted: '🤍 아직 찜한 책이 없어요. 다른 사람 책 상세에서 찜하기를 눌러보세요.',
+        exchangeSoon: '📅 아직 교환 예정으로 잡힌 책이 없어요.'
     };
-    function shelfCategoryList_(category, reading, finished, unread, nextToRead, wanted) {
+    function shelfCategoryList_(category, reading, finished, unread, nextToRead, wanted, exchangeSoon) {
         return category === 'reading' ? reading
             : category === 'unread' ? unread
             : category === 'nextToRead' ? (nextToRead || [])
             : category === 'wanted' ? (wanted || [])
+            : category === 'exchangeSoon' ? (exchangeSoon || [])
             : finished;
     }
     function shelfSearchFilter_(list, query) {
@@ -875,6 +880,15 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             mapper = function (item) {
                 return item.requestedById !== undefined ? wishCompactCardHtml_(item) : libraryBookCardHtml_(item, viewerId, 'wanted');
             };
+        } else if (category === 'exchangeSoon') {
+            mapper = function (b) {
+                var toEntry = (b.queue || []).find(function (q) { return (typeof q === 'object' ? q.desiredDate : null) === b.nextExchangeDate; });
+                var toMember = toEntry ? getMember(qMemberId(toEntry)) : null;
+                var fromMember = getMember(b.currentReaderId || b.holderId || b.ownerId);
+                var line = '📅 ' + fmtDate(b.nextExchangeDate) + (toMember && fromMember ? ' · ' + escapeHtml(fromMember.name) + ' → ' + escapeHtml(toMember.name) : '');
+                var labelKey = b.status === 'reading' ? 'reading' : (b.status === 'finished' ? 'finished' : 'shelved');
+                return libraryBookCardHtml_(b, b.ownerId, labelKey, line);
+            };
         } else {
             mapper = function (b) {
                 var last = lastReadSummary(b);
@@ -888,14 +902,25 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var myId = getLoggedInMemberId();
         var scopeMine = shelfScope === 'mine';
         var reading = state.books.filter(function (b) { return b.status === 'reading' && (!scopeMine || b.ownerId === myId); });
-        var finished = state.books.filter(function (b) { return b.status === 'finished' && (!scopeMine || b.ownerId === myId); });
-        var unread = state.books.filter(function (b) { return b.status === 'shelved' && (!scopeMine || b.ownerId === myId); });
+        // "내 서고"의 완독/안읽음은 책 상태가 아니라 "나 자신이 실제로 다 읽었는지"를
+        // 기준으로 갈라야 한다 — 안나가 내 책을 빌려서 완독해도 나는 아직 안 읽은 거다.
+        // "우리 서고"(scopeMine=false)는 반대로 책 자체의 공용 상태를 그대로 보여준다.
+        var finished = state.books.filter(function (b) {
+            return scopeMine ? (b.ownerId === myId && hasMemberFinishedBook_(b, myId)) : b.status === 'finished';
+        });
+        var unread = state.books.filter(function (b) {
+            return scopeMine ? (b.ownerId === myId && b.status !== 'reading' && !hasMemberFinishedBook_(b, myId)) : b.status === 'shelved';
+        });
         var nextToRead = state.books.filter(function (b) { return b.status === 'shelved' && b.wantToRead && b.ownerId === myId; });
         var wanted = scopeMine && myId ? (function () {
             var groups = libraryGroupsForMember_(myId);
             return groups.hearted.concat(groups.wishItems);
         })() : [];
-        var counts = { finished: finished.length, reading: reading.length, unread: unread.length, nextToRead: nextToRead.length, wanted: wanted.length };
+        // "교환 예정" — 합의된 교환일(next_exchange_date)이 있는 책. 지금 읽는 중이든
+        // (다음 사람에게 넘길 예정) 아직 대기열에서 기다리는 중이든(첫 전달 예정이든)
+        // 상관없이, 곧 손이 바뀔 예정인 책을 한군데서 볼 수 있게 한다.
+        var exchangeSoon = state.books.filter(function (b) { return !!b.nextExchangeDate; });
+        var counts = { finished: finished.length, reading: reading.length, unread: unread.length, nextToRead: nextToRead.length, wanted: wanted.length, exchangeSoon: exchangeSoon.length };
 
         // 맨 위: 소장도서·완독도서·읽는 중인 책을 한 서고에 다 같이 꽂아서 총 진열
         // ('이 책 찾아요'는 별도 탭이라 여기엔 포함하지 않는다 — 우리가 실제로 갖고 있는 책만 서고에 꽂는다)
@@ -912,7 +937,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 
         // "아직 안 읽었어요" 탭이 flex-wrap 때문에 둘째 줄에 혼자 남는 자리라,
         // 책 추가 버튼을 같은 탭 목록 안에 넣어서 바로 그 옆에 붙인다.
-        var categories = scopeMine ? SHELF_CATEGORIES_.concat([SHELF_NEXT_TO_READ_CATEGORY_, SHELF_WANTED_CATEGORY_]) : SHELF_CATEGORIES_;
+        var categories = scopeMine
+            ? SHELF_CATEGORIES_.concat([SHELF_NEXT_TO_READ_CATEGORY_, SHELF_WANTED_CATEGORY_])
+            : SHELF_CATEGORIES_.concat([SHELF_EXCHANGE_SOON_CATEGORY_]);
         var tabsHtml = '<div class="shelf-category-tabs">' + categories.map(function (c) {
             return '<button class="btn-secondary' + (shelfCategory === c.key ? ' active' : '') + '" data-shelf-category="' + c.key + '">'
                 + escapeHtml(c.label) + ' ' + counts[c.key] + '권</button>';
@@ -921,7 +948,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var searchHtml = '<div class="assign-select-row" style="margin-bottom:12px;">'
             + '<input type="text" id="shelfSearchInput" class="input-plain" placeholder="제목·저자 검색" style="flex:1;">'
             + '</div>';
-        var currentList = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead, wanted);
+        var currentList = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead, wanted, exchangeSoon);
         var bodyHtml = '<div id="shelfCardsBox">' + shelfCardsHtml_(shelfCategory, currentList, SHELF_EMPTY_TEXT_[shelfCategory]) + '</div>';
 
         return scopeHtml + overviewHtml + tabsHtml + searchHtml + bodyHtml;
@@ -1353,6 +1380,13 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     // ---------- MEMBER DETAIL ----------
     var BOOK_STATUS_LABELS = { reading: '읽는 중', finished: '완독', shelved: '안 읽음', queued: '대기 중', nextToRead: '다음에 읽을 책', wanted: '찜한 책' };
     var BOOK_STATUS_COLORS = { reading: 'var(--stamp)', finished: 'var(--line-green)', shelved: 'var(--pencil)', queued: 'var(--stamp)', nextToRead: 'var(--gold)', wanted: 'var(--gold)' };
+    // 책은 소유자와 무관하게 "완독" 여부가 사람마다 다르다 — 안나가 고니 책을 빌려
+    // 완독해도 고니 본인은 그 책을 아직 안 읽은 것과 같다. status는 책 한 권에 하나뿐인
+    // 공용 필드라 누가 완독했는지는 못 담고, history의 "이 사람이 endDate와 함께
+    // 남긴 기록"만이 그 사람이 실제로 다 읽었다는 뜻이다.
+    function hasMemberFinishedBook_(b, memberId) {
+        return (b.history || []).some(function (h) { return h.memberId === memberId && h.endDate; });
+    }
     function libraryGroupsForMember_(memberId) {
         var reading = state.books.filter(function (b) { return b.currentReaderId === memberId && b.status === 'reading'; });
         var queued = state.books.filter(function (b) { return queueHasMember(b.queue, memberId); });
@@ -1363,14 +1397,10 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var seen = {};
         state.books.forEach(function (b) {
             if (seen[b.id]) return;
-            var hasClosedHistory = (b.history || []).some(function (h) { return h.memberId === memberId && h.endDate; });
-            if (b.ownerId === memberId && b.status === 'finished') {
+            if (hasMemberFinishedBook_(b, memberId)) {
                 seen[b.id] = true;
                 finished.push(b);
-            } else if (b.ownerId !== memberId && hasClosedHistory) {
-                seen[b.id] = true;
-                finished.push(b);
-            } else if (b.ownerId === memberId && b.status === 'shelved') {
+            } else if (b.ownerId === memberId && b.status !== 'reading') {
                 seen[b.id] = true;
                 (b.wantToRead ? nextToRead : unread).push(b);
             } else if (b.ownerId !== memberId && (b.hearts || []).indexOf(memberId) > -1) {
@@ -3860,6 +3890,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             el.onclick = function () {
                 var scope = el.dataset.shelfScope;
                 if (scope === 'mine') {
+                    // "교환 예정" 탭은 우리 서고 전용이라, 내 서고로 넘어가면 탭이 사라지니
+                    // 거기 머물러 있던 상태면 기본 탭으로 되돌린다.
+                    if (shelfCategory === 'exchangeSoon') shelfCategory = 'finished';
                     requireLogin(function () { shelfScope = 'mine'; render(); });
                 } else {
                     shelfScope = 'ours';
@@ -3882,14 +3915,19 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 var scopeMine = shelfScope === 'mine';
                 var myId = getLoggedInMemberId();
                 var reading = state.books.filter(function (b) { return b.status === 'reading' && (!scopeMine || b.ownerId === myId); });
-                var finished = state.books.filter(function (b) { return b.status === 'finished' && (!scopeMine || b.ownerId === myId); });
-                var unread = state.books.filter(function (b) { return b.status === 'shelved' && (!scopeMine || b.ownerId === myId); });
+                var finished = state.books.filter(function (b) {
+                    return scopeMine ? (b.ownerId === myId && hasMemberFinishedBook_(b, myId)) : b.status === 'finished';
+                });
+                var unread = state.books.filter(function (b) {
+                    return scopeMine ? (b.ownerId === myId && b.status !== 'reading' && !hasMemberFinishedBook_(b, myId)) : b.status === 'shelved';
+                });
                 var nextToRead = state.books.filter(function (b) { return b.status === 'shelved' && b.wantToRead && b.ownerId === myId; });
                 var wanted = scopeMine && myId ? (function () {
                     var groups = libraryGroupsForMember_(myId);
                     return groups.hearted.concat(groups.wishItems);
                 })() : [];
-                var list = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead, wanted);
+                var exchangeSoon = state.books.filter(function (b) { return !!b.nextExchangeDate; });
+                var list = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead, wanted, exchangeSoon);
                 var filtered = shelfSearchFilter_(list, shelfSearchInput.value);
                 var emptyText = shelfSearchInput.value.trim() ? '검색 결과가 없어요.' : SHELF_EMPTY_TEXT_[shelfCategory];
                 document.getElementById('shelfCardsBox').innerHTML = shelfCardsHtml_(shelfCategory, filtered, emptyText);
