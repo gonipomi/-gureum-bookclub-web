@@ -1607,15 +1607,40 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                         readActionHtml += incomingReadRequestsSectionHtml_(b, incomingReadRequestsShelved);
                     }
                 }
+                // 책주인이 먼저 "빌려줄까?" 하고 특정 멤버에게 제안하는 기능 — 읽기 신청은
+                // 읽고 싶은 사람이 먼저 움직여야 했는데, 이건 반대로 책주인이 먼저 움직인다.
+                if (myId && myId === b.ownerId && !b.pendingReturn && !b.externalBorrow) {
+                    readActionHtml += '<div style="margin-top:6px;"><button class="btn-secondary" id="proposeLendBtn">🤝 교환 제안하기</button></div>';
+                    var myLendOffers = b.lendOffers || [];
+                    if (myLendOffers.length) {
+                        readActionHtml += '<div class="queue-list" style="margin-top:8px;">' + myLendOffers.map(function (o) {
+                            var m = getMember(o.memberId);
+                            if (!m) return '';
+                            return '<div class="queue-item" style="flex-wrap:wrap;">'
+                                + '<span class="qname">' + escapeHtml(m.name) + '님에게 제안함' + (o.desiredDate ? ' · ' + fmtDate(o.desiredDate) + ' 희망' : '') + '</span>'
+                                + '<span style="font-size:11.5px;color:var(--pencil);">응답 기다리는 중</span>'
+                                + '<button class="btn-text" style="color:var(--stamp);" data-decline-lend-offer="' + o.id + '" data-lend-book="' + b.id + '">제안 취소</button>'
+                                + '</div>';
+                        }).join('') + '</div>';
+                    }
+                }
             } else if (b.externalBorrow) {
                 readActionHtml = '';
             } else {
+                var myLendOffer_1 = (b.lendOffers || []).find(function (o) { return o.memberId === myId; });
+                if (myLendOffer_1) {
+                    readActionHtml = '<div class="field" style="background:var(--card-bg);border:1.5px solid var(--gold);border-radius:8px;padding:12px;margin-bottom:12px;">'
+                        + '<p style="font-size:12.5px;color:var(--ink);margin-bottom:10px;">🤝 ' + escapeHtml((owner || {}).name || '책주인') + '님이 이 책을 빌려주고 싶어해요' + (myLendOffer_1.desiredDate ? ' (' + fmtDate(myLendOffer_1.desiredDate) + ' 희망)' : '') + '.</p>'
+                        + '<button class="heart-btn" data-accept-lend-offer="' + myLendOffer_1.id + '" data-lend-book="' + b.id + '">수락</button>'
+                        + '<button class="btn-text" style="color:var(--stamp);" data-decline-lend-offer="' + myLendOffer_1.id + '" data-lend-book="' + b.id + '">거절</button>'
+                        + '</div>';
+                }
                 var myExistingRequest_1 = (b.readRequests || []).find(function (r) { return r.memberId === myId; });
                 if (myExistingRequest_1) {
-                    readActionHtml = '<p style="font-size:12.5px;color:var(--pencil);">신청했어요. 책주인의 승인을 기다리는 중이에요.</p>'
+                    readActionHtml += '<p style="font-size:12.5px;color:var(--pencil);">신청했어요. 책주인의 승인을 기다리는 중이에요.</p>'
                         + '<button class="btn-secondary" data-cancel-request="' + myExistingRequest_1.id + '" data-request-book="' + b.id + '">신청 취소</button>';
-                } else {
-                    readActionHtml = '<button class="btn-primary" id="requestReadBtn">📖 읽기 신청</button>';
+                } else if (!myLendOffer_1) {
+                    readActionHtml += '<button class="btn-primary" id="requestReadBtn">📖 읽기 신청</button>';
                 }
             }
         }
@@ -1624,6 +1649,11 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         }
         else {
             readActionHtml = '<button class="btn-secondary" disabled>📖 ' + escapeHtml((currentReader || {}).name || '다른 사람') + '님이 읽고 있어요</button>';
+        }
+        // "읽는 중 취소" — 대기열에서 너무 일찍 "넘기기"를 누르는 등 실수로 읽는 중이 된 걸
+        // 되돌리는 복구용 액션. 책주인이나 지금 읽는 사람만 할 수 있다.
+        if (myId && b.currentReaderId && (myId === b.ownerId || myId === b.currentReaderId)) {
+            readActionHtml += '<div style="margin-top:6px;"><button class="btn-text" style="color:var(--stamp);" id="cancelReadingBtn">읽는 중 취소</button></div>';
         }
         var myQueued = !!(myId && queueHasMember(queue, myId));
         var finishedActionHtml = '';
@@ -3195,6 +3225,55 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                     }
                 });
             };
+        var cancelReadingBtn = document.getElementById('cancelReadingBtn');
+        if (cancelReadingBtn)
+            cancelReadingBtn.onclick = function () {
+                if (!confirm('읽는 중 상태를 취소할까요? 오늘 시작한 기록이 사라져요.')) return;
+                requireLogin(async function (myId) {
+                    setBtnLoading(cancelReadingBtn, '취소하는 중...');
+                    try {
+                        applyState(await callServer('cancelReading', detailBookId, myId));
+                        render();
+                        showToast('읽는 중을 취소했어요');
+                    } catch (err) {
+                        showToast(err.message || '실패했어요', true);
+                        resetBtn(cancelReadingBtn);
+                    }
+                });
+            };
+        var proposeLendBtn = document.getElementById('proposeLendBtn');
+        if (proposeLendBtn)
+            proposeLendBtn.onclick = function () { openProposeLendModal(detailBookId); };
+        document.querySelectorAll('[data-accept-lend-offer]').forEach(function (btn) {
+            btn.onclick = function () {
+                requireLogin(async function (myId) {
+                    setBtnLoading(btn, '수락하는 중...');
+                    try {
+                        applyState(await callServer('acceptLendOffer', btn.dataset.lendBook, btn.dataset.acceptLendOffer, myId));
+                        render();
+                        showToast('수락했어요. 실제로 책을 건넬 때 대기열에서 "넘기기"를 눌러주세요.');
+                    } catch (err) {
+                        showToast(err.message || '실패했어요', true);
+                        resetBtn(btn);
+                    }
+                });
+            };
+        });
+        document.querySelectorAll('[data-decline-lend-offer]').forEach(function (btn) {
+            btn.onclick = function () {
+                requireLogin(async function (myId) {
+                    setBtnLoading(btn, '...');
+                    try {
+                        applyState(await callServer('declineLendOffer', btn.dataset.lendBook, btn.dataset.declineLendOffer, myId));
+                        render();
+                        showToast('제안을 취소했어요');
+                    } catch (err) {
+                        showToast(err.message || '실패했어요', true);
+                        resetBtn(btn);
+                    }
+                });
+            };
+        });
         var toggleRecommendBtn = document.getElementById('toggleRecommendBtn');
         if (toggleRecommendBtn)
             toggleRecommendBtn.onclick = function () {
@@ -3956,6 +4035,39 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 closeModal();
                 render();
                 showToast('추천했어요 ⭐');
+            } catch (err) {
+                showToast(err.message || '실패했어요', true);
+                resetBtn(e.target);
+            }
+        };
+    }
+    // 책주인이 특정 멤버에게 먼저 "이 책 빌려줄까요?" 제안하는 모달. 이미 대기열에
+    // 있거나 이미 제안을 받은 사람은 후보에서 뺀다(중복 제안 방지, 서버도 같은 걸 막는다).
+    function openProposeLendModal(bookId) {
+        var b = getBook(bookId);
+        if (!b) return;
+        var myId = getLoggedInMemberId();
+        var offeredIds = (b.lendOffers || []).map(function (o) { return o.memberId; });
+        var eligible = state.members.filter(function (m) { return m.id !== myId && !queueHasMember(b.queue, m.id) && offeredIds.indexOf(m.id) === -1; });
+        if (!eligible.length) {
+            showToast('제안할 수 있는 멤버가 없어요', true);
+            return;
+        }
+        openModal('<h3>교환 제안하기</h3>'
+            + '<div class="field"><label>누구에게 빌려줄까요?</label>'
+            + '<select id="lendTargetMember" class="input-plain">' + eligible.map(function (m) { return '<option value="' + m.id + '">' + escapeHtml(m.name) + '</option>'; }).join('') + '</select>'
+            + '</div>'
+            + '<div class="field"><label>원하는 날짜 (선택)</label><input type="date" id="lendDesiredDate"></div>'
+            + '<button class="btn-primary" id="submitLendOfferBtn">제안하기</button>');
+        document.getElementById('submitLendOfferBtn').onclick = async function (e) {
+            var targetId = document.getElementById('lendTargetMember').value;
+            var date = document.getElementById('lendDesiredDate').value || null;
+            setBtnLoading(e.target, '제안하는 중...');
+            try {
+                applyState(await callServer('proposeBookToMember', bookId, myId, targetId, date));
+                closeModal();
+                render();
+                showToast('제안했어요');
             } catch (err) {
                 showToast(err.message || '실패했어요', true);
                 resetBtn(e.target);

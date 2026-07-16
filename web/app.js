@@ -381,6 +381,18 @@ async function dispatchServerCall(fnName, args) {
         case 'claimBookCopy':
             return rpc('claim_book_copy', { p_group_id: groupId, p_book_id: args[0], p_member_id: args[1] });
 
+        case 'cancelReading':
+            return rpc('cancel_reading', { p_group_id: groupId, p_book_id: args[0], p_actor_id: args[1] });
+
+        case 'proposeBookToMember':
+            return rpc('propose_book_to_member', { p_group_id: groupId, p_book_id: args[0], p_owner_id: args[1], p_member_id: args[2], p_desired_date: args[3] || null });
+
+        case 'acceptLendOffer':
+            return rpc('accept_lend_offer', { p_group_id: groupId, p_book_id: args[0], p_offer_id: args[1], p_member_id: args[2] });
+
+        case 'declineLendOffer':
+            return rpc('decline_lend_offer', { p_group_id: groupId, p_book_id: args[0], p_offer_id: args[1], p_actor_id: args[2] });
+
         case 'searchKakaoBooks': {
             const { data, error } = await supabase.functions.invoke('search-kakao-books', { body: { query: args[0] } });
             if (error) throw new Error(error.message || '카카오 검색에 실패했어요');
