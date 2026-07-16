@@ -821,20 +821,23 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         { key: 'reading', label: '읽는 중' },
         { key: 'unread', label: '아직 안 읽었어요' }
     ];
-    // "다음에 읽을 책"은 내 소장 도서 중 내가 우선순위로 찜한 것뿐이라, 그룹 전체를
-    // 섞어 보는 "우리 서고"에선 의미가 없다 — "내 서고"에서만 탭으로 노출한다.
+    // "다음에 읽을 책"과 "찜한 책"은 둘 다 내 개인 관심사라, 그룹 전체를 섞어 보는
+    // "우리 서고"에선 의미가 없다 — "내 서고"에서만 탭으로 노출한다.
     var SHELF_NEXT_TO_READ_CATEGORY_ = { key: 'nextToRead', label: '다음에 읽을 책' };
+    var SHELF_WANTED_CATEGORY_ = { key: 'wanted', label: '찜한 책' };
     var SHELF_EMPTY_TEXT_ = {
         wish: '🔍 아직 등록된 책이 없어요. 갖고 있는 사람이 있는지 물어볼 책을 등록해보세요.',
         reading: '📖 지금 읽는 책이 없어요.',
         unread: '🌱 아직 아무도 안 읽은 책이 없어요.',
         finished: '✅ 아직 다 읽은 책이 없어요.',
-        nextToRead: '🌱 다음에 읽을 책으로 찜한 게 없어요. 안 읽은 책 카드에서 체크해보세요.'
+        nextToRead: '🌱 다음에 읽을 책으로 찜한 게 없어요. 안 읽은 책 카드에서 체크해보세요.',
+        wanted: '🤍 아직 찜한 책이 없어요. 다른 사람 책 상세에서 찜하기를 눌러보세요.'
     };
-    function shelfCategoryList_(category, reading, finished, unread, nextToRead) {
+    function shelfCategoryList_(category, reading, finished, unread, nextToRead, wanted) {
         return category === 'reading' ? reading
             : category === 'unread' ? unread
             : category === 'nextToRead' ? (nextToRead || [])
+            : category === 'wanted' ? (wanted || [])
             : finished;
     }
     function shelfSearchFilter_(list, query) {
@@ -865,6 +868,13 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
             };
         } else if (category === 'nextToRead') {
             mapper = function (b) { return libraryBookCardHtml_(b, b.ownerId, 'nextToRead'); };
+        } else if (category === 'wanted') {
+            // "찜한 책"은 남의 책에 찜한 것(hearted)과 그룹에 아무도 안 갖고 있어 등록한
+            // 위시리스트 항목(wish)이 섞여 있다 — 위시리스트 항목만 requestedById를 갖는다.
+            var viewerId = getLoggedInMemberId();
+            mapper = function (item) {
+                return item.requestedById !== undefined ? wishCompactCardHtml_(item) : libraryBookCardHtml_(item, viewerId, 'wanted');
+            };
         } else {
             mapper = function (b) {
                 var last = lastReadSummary(b);
@@ -881,7 +891,11 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var finished = state.books.filter(function (b) { return b.status === 'finished' && (!scopeMine || b.ownerId === myId); });
         var unread = state.books.filter(function (b) { return b.status === 'shelved' && (!scopeMine || b.ownerId === myId); });
         var nextToRead = state.books.filter(function (b) { return b.status === 'shelved' && b.wantToRead && b.ownerId === myId; });
-        var counts = { finished: finished.length, reading: reading.length, unread: unread.length, nextToRead: nextToRead.length };
+        var wanted = scopeMine && myId ? (function () {
+            var groups = libraryGroupsForMember_(myId);
+            return groups.hearted.concat(groups.wishItems);
+        })() : [];
+        var counts = { finished: finished.length, reading: reading.length, unread: unread.length, nextToRead: nextToRead.length, wanted: wanted.length };
 
         // 맨 위: 소장도서·완독도서·읽는 중인 책을 한 서고에 다 같이 꽂아서 총 진열
         // ('이 책 찾아요'는 별도 탭이라 여기엔 포함하지 않는다 — 우리가 실제로 갖고 있는 책만 서고에 꽂는다)
@@ -898,7 +912,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 
         // "아직 안 읽었어요" 탭이 flex-wrap 때문에 둘째 줄에 혼자 남는 자리라,
         // 책 추가 버튼을 같은 탭 목록 안에 넣어서 바로 그 옆에 붙인다.
-        var categories = scopeMine ? SHELF_CATEGORIES_.concat([SHELF_NEXT_TO_READ_CATEGORY_]) : SHELF_CATEGORIES_;
+        var categories = scopeMine ? SHELF_CATEGORIES_.concat([SHELF_NEXT_TO_READ_CATEGORY_, SHELF_WANTED_CATEGORY_]) : SHELF_CATEGORIES_;
         var tabsHtml = '<div class="shelf-category-tabs">' + categories.map(function (c) {
             return '<button class="btn-secondary' + (shelfCategory === c.key ? ' active' : '') + '" data-shelf-category="' + c.key + '">'
                 + escapeHtml(c.label) + ' ' + counts[c.key] + '권</button>';
@@ -907,7 +921,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         var searchHtml = '<div class="assign-select-row" style="margin-bottom:12px;">'
             + '<input type="text" id="shelfSearchInput" class="input-plain" placeholder="제목·저자 검색" style="flex:1;">'
             + '</div>';
-        var currentList = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead);
+        var currentList = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead, wanted);
         var bodyHtml = '<div id="shelfCardsBox">' + shelfCardsHtml_(shelfCategory, currentList, SHELF_EMPTY_TEXT_[shelfCategory]) + '</div>';
 
         return scopeHtml + overviewHtml + tabsHtml + searchHtml + bodyHtml;
@@ -3750,9 +3764,9 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                     requireLogin(function () { shelfScope = 'mine'; render(); });
                 } else {
                     shelfScope = 'ours';
-                    // "다음에 읽을 책" 탭은 내 서고 전용이라, 우리 서고로 돌아가면 탭이 사라지니
-                    // 거기 머물러 있던 상태면 기본 탭으로 되돌린다.
-                    if (shelfCategory === 'nextToRead') shelfCategory = 'finished';
+                    // "다음에 읽을 책"/"찜한 책" 탭은 내 서고 전용이라, 우리 서고로 돌아가면
+                    // 탭이 사라지니 거기 머물러 있던 상태면 기본 탭으로 되돌린다.
+                    if (shelfCategory === 'nextToRead' || shelfCategory === 'wanted') shelfCategory = 'finished';
                     render();
                 }
             };
@@ -3772,7 +3786,11 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 var finished = state.books.filter(function (b) { return b.status === 'finished' && (!scopeMine || b.ownerId === myId); });
                 var unread = state.books.filter(function (b) { return b.status === 'shelved' && (!scopeMine || b.ownerId === myId); });
                 var nextToRead = state.books.filter(function (b) { return b.status === 'shelved' && b.wantToRead && b.ownerId === myId; });
-                var list = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead);
+                var wanted = scopeMine && myId ? (function () {
+                    var groups = libraryGroupsForMember_(myId);
+                    return groups.hearted.concat(groups.wishItems);
+                })() : [];
+                var list = shelfCategoryList_(shelfCategory, reading, finished, unread, nextToRead, wanted);
                 var filtered = shelfSearchFilter_(list, shelfSearchInput.value);
                 var emptyText = shelfSearchInput.value.trim() ? '검색 결과가 없어요.' : SHELF_EMPTY_TEXT_[shelfCategory];
                 document.getElementById('shelfCardsBox').innerHTML = shelfCardsHtml_(shelfCategory, filtered, emptyText);
