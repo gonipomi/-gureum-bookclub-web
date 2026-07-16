@@ -378,6 +378,9 @@ async function dispatchServerCall(fnName, args) {
         case 'toggleBookRecommend':
             return rpc('toggle_book_recommend', { p_group_id: groupId, p_book_id: args[0], p_member_id: args[1], p_recommended: !!args[2], p_comment: args[3] || null });
 
+        case 'claimBookCopy':
+            return rpc('claim_book_copy', { p_group_id: groupId, p_book_id: args[0], p_member_id: args[1] });
+
         case 'searchKakaoBooks': {
             const { data, error } = await supabase.functions.invoke('search-kakao-books', { body: { query: args[0] } });
             if (error) throw new Error(error.message || '카카오 검색에 실패했어요');

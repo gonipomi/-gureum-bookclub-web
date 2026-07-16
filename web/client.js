@@ -1557,6 +1557,10 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
         // 찜하기(약한 위시리스트) — 외부 대여 도서·본인 소유 책은 제외, 승인 없이 자유롭게 토글
         var canHeart = !!myId && b.ownerId !== myId && !b.externalBorrow;
         var isHearted = !!(myId && (b.hearts || []).indexOf(myId) > -1);
+        // "저도 이 책 있어요" — 남의 책인데 나도 같은 책을 소장하고 있으면 내 서고에도 등록.
+        // 이미 같은 제목으로 내 서고에 있으면 다시 등록할 필요 없으니 버튼을 숨긴다.
+        var iAlreadyHaveThisBook = !!myId && state.books.some(function (x) { return x.ownerId === myId && normalizeTitle_(x.title) === normalizeTitle_(b.title); });
+        var canClaimCopy = !!myId && b.ownerId !== myId && !iAlreadyHaveThisBook;
         var currentReader = getMember(b.currentReaderId);
         // 이 책 추천해요 — 실제로 읽어본 사람만(책주인·지금 읽는 사람·읽은 기록이 있는 사람) 가능
         var myRecommendation = (b.recommendations || []).find(function (r) { return r.memberId === myId; });
@@ -1732,6 +1736,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                     ? '<span class="stamp done">DONE</span>' + (b.externalBorrow ? ' <span class="stamp" style="color:var(--pencil);border-color:var(--pencil);">🏛 외부 대여</span>' : '')
                     : '<span class="queue-empty">지금 읽는 사람 없음</span>'))
             + (canHeart ? '<div style="margin-top:6px;"><button class="heart-btn" id="toggleHeartBtn">' + (isHearted ? '❤️ 찜함' : '🤍 찜하기') + '</button></div>' : '')
+            + (canClaimCopy ? '<div style="margin-top:6px;"><button class="heart-btn" id="claimBookCopyBtn">📚 저도 이 책 있어요</button></div>' : '')
             + (canRecommend ? '<div style="margin-top:6px;"><button class="heart-btn" id="toggleRecommendBtn">' + (myRecommendation ? '⭐ 추천함' : '⭐ 이 책 추천해요') + '</button></div>' : '')
             + wantToReadToggleHtml
             + (canDelete ? '<div><button class="edit-icon-btn" id="editBookInfoBtn">제목·저자 수정</button><button class="edit-icon-btn" style="color:var(--stamp);" id="deleteBookBtn">책 삭제</button></div>' : '')
@@ -3172,6 +3177,21 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                         showToast(wasHearted ? '찜을 취소했어요' : '찜했어요');
                     } catch (err) {
                         showToast(err.message || '실패했어요', true);
+                    }
+                });
+            };
+        var claimBookCopyBtn = document.getElementById('claimBookCopyBtn');
+        if (claimBookCopyBtn)
+            claimBookCopyBtn.onclick = function () {
+                requireLogin(async function (myId) {
+                    setBtnLoading(claimBookCopyBtn, '등록하는 중...');
+                    try {
+                        applyState(await callServer('claimBookCopy', detailBookId, myId));
+                        render();
+                        showToast('내 서고에도 등록했어요');
+                    } catch (err) {
+                        showToast(err.message || '실패했어요', true);
+                        resetBtn(claimBookCopyBtn);
                     }
                 });
             };
