@@ -506,6 +506,11 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                 : (myOwnQueueRequest.desiredDate ? '내가 ' + fmtDate(myOwnQueueRequest.desiredDate) + ' 신청' : '내가 신청함');
             readRequestHtml += '<div class="date-range" style="margin-top:4px;color:var(--gold);">📩 ' + myReqDateText + ' · 수락 대기중</div>';
         }
+        var myApprovedQueueEntry = (b.queue || []).find(function (q) { return qMemberId(q) === getLoggedInMemberId(); });
+        if (myApprovedQueueEntry && getLoggedInMemberId() !== b.ownerId) {
+            var myQueueDateText = (typeof myApprovedQueueEntry === 'object' && myApprovedQueueEntry.desiredDate) ? ' · ' + fmtDate(myApprovedQueueEntry.desiredDate) + ' 예정' : '';
+            readRequestHtml += '<div class="date-range" style="margin-top:4px;color:var(--stamp);">✅ 승인됨' + myQueueDateText + ' · 전달 대기중</div>';
+        }
         if (b.status === 'reading' && getLoggedInMemberId() !== b.currentReaderId && !myOwnQueueRequest && (b.queueRequests || []).length) {
             var pendingNames = (b.queueRequests || []).map(function (r) { var m = getMember(r.memberId); return m ? m.name : null; }).filter(Boolean);
             if (pendingNames.length) {
@@ -1666,9 +1671,17 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
                         + '</div>';
                 }
                 var myExistingRequest_1 = (b.readRequests || []).find(function (r) { return r.memberId === myId; });
+                var myQueueEntry_1 = queue.find(function (q) { return qMemberId(q) === myId; });
                 if (myExistingRequest_1) {
                     readActionHtml += '<p style="font-size:12.5px;color:var(--pencil);">신청했어요. 책주인의 승인을 기다리는 중이에요.</p>'
                         + '<button class="btn-secondary" data-cancel-request="' + myExistingRequest_1.id + '" data-request-book="' + b.id + '">신청 취소</button>';
+                } else if (myQueueEntry_1) {
+                    // 승인은 됐지만(대기열에 들어갔지만) 아직 책주인이 실제로 안 건넨 상태 —
+                    // 이걸 안 보여주면 화면엔 다시 "읽기 신청" 버튼만 남아서, 승인이 씹힌 것처럼
+                    // 보이는 바람에 책주인이 헷갈려서 "넘기기"를 서둘러 눌러버리는 문제가 있었다.
+                    var myQueueDate_1 = (typeof myQueueEntry_1 === 'object' && myQueueEntry_1.desiredDate) ? myQueueEntry_1.desiredDate : null;
+                    readActionHtml += '<p style="font-size:12.5px;color:var(--pencil);">✅ 승인됐어요' + (myQueueDate_1 ? ' · ' + fmtDate(myQueueDate_1) + ' 예정' : '') + '. 책주인이 실제로 책을 건네면 읽는 중으로 바뀌어요.</p>'
+                        + '<button class="btn-secondary" data-remove-queue="' + b.id + '" data-remove-member="' + myId + '">대기 취소</button>';
                 } else if (!myLendOffer_1) {
                     readActionHtml += '<button class="btn-primary" id="requestReadBtn">📖 읽기 신청</button>';
                 }
